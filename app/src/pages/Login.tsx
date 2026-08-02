@@ -14,9 +14,22 @@ const ROLE_LABEL: Record<string, string> = {
 }
 
 export default function Login() {
-  const { login } = useApp()
+  const { login, authLogin } = useApp()
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
   const shield = useBrand('GLOBAL', 'shield')
+
+  const doLogin = async () => {
+    if (!email.trim() || !password) return
+    setBusy(true)
+    setErr('')
+    const e = await authLogin(email.trim(), password)
+    setBusy(false)
+    if (e) setErr(e)
+  }
 
   // country pre-fill from phone prefix (the real registration flow)
   const detected = phone.replace(/\s/g, '').startsWith('+62')
@@ -43,9 +56,44 @@ export default function Login() {
           </p>
         </div>
 
+        {/* Real sign-in (Supabase) */}
+        <label htmlFor="email" className="mb-1.5 block text-xs font-semibold text-muted">
+          Sign in
+        </label>
+        <input
+          id="email"
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
+        />
+        <input
+          id="password"
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && doLogin()}
+          className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
+        />
+        {err && (
+          <p className="mb-2 rounded-lg border border-danger/50 bg-danger/10 p-2 text-xs font-semibold text-danger">
+            {err}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={doLogin}
+          disabled={busy || !email.trim() || !password}
+          className="mb-6 h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+
         {/* Phone entry with country auto-detect */}
         <label htmlFor="phone" className="mb-1.5 block text-xs font-semibold text-muted">
-          Phone number
+          Phone number (registration preview)
         </label>
         <div className="relative mb-2">
           <input
@@ -72,7 +120,7 @@ export default function Login() {
 
         {/* Demo personas */}
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-          Quick login (demo)
+          Demo preview (mock data)
         </p>
         <div className="space-y-2.5">
           {PERSONAS.map((p: User) => (
