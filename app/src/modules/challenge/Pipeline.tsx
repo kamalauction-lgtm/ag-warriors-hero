@@ -247,7 +247,7 @@ export default function Pipeline() {
                       <div className="mb-2 flex items-center gap-2">
                         <select value={closing.status} onChange={(e) => patchClosing({ status: e.target.value }, 'Closing → ' + e.target.value)}
                           className="h-10 flex-1 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent">
-                          {CLOSE_STATUS.map((s) => <option key={s}>{s.replaceAll('_', ' ')}</option>)}
+                          {CLOSE_STATUS.map((s) => <option key={s} value={s}>{s.replaceAll('_', ' ')}</option>)}
                         </select>
                       </div>
                       {closing.missing_items && <p className="mb-2 rounded-lg bg-warning/10 p-2 text-[11px] text-warning">🔄 Reviewer: {closing.missing_items}</p>}
