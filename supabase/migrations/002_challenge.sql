@@ -264,9 +264,9 @@ select v.id, 1, 1,
 from curriculum_versions v;
 
 insert into cohorts (name, country, curriculum_version_id, official_start_date, official_timezone, daily_unlock_time, status)
-select 'MY Cohort 1 — August', 'MY', v.id, current_date + 3, 'Asia/Kuala_Lumpur', '06:00', 'open' from curriculum_versions v
+select 'MY Cohort 1 — August', 'MY'::country_t, v.id, current_date + 3, 'Asia/Kuala_Lumpur', '06:00'::time, 'open' from curriculum_versions v
 union all
-select 'ID Cohort 1 — Agustus', 'ID', v.id, current_date + 3, 'Asia/Jakarta', '06:00', 'open' from curriculum_versions v;
+select 'ID Cohort 1 — Agustus', 'ID'::country_t, v.id, current_date + 3, 'Asia/Jakarta', '06:00'::time, 'open' from curriculum_versions v;
 
 insert into xp_rules (code, points, description) values
  ('day_complete', 10, 'Approved daily task'),
