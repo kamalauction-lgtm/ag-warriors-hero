@@ -39,6 +39,18 @@ export default function Grow() {
       </header>
 
       <div className="mb-4 space-y-2.5">
+        {(user.role === 'master_admin' || user.role === 'country_admin' || user.role === 'leader') && (
+          <Card onClick={() => nav('/coach')} className="flex items-center gap-3 border-warning/50 bg-warning/10 p-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-warning/20 text-warning">
+              <GraduationCap size={20} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[15px] font-semibold">Coach Review Queue</p>
+              <p className="text-xs text-muted">Approve readiness & evidence — human only</p>
+            </div>
+            <ChevronRight size={16} className="shrink-0 text-muted" />
+          </Card>
+        )}
         {TILES.map((tile) => (
           <Card
             key={tile.title}
