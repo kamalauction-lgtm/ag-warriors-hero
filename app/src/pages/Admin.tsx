@@ -40,6 +40,7 @@ import { Avatar, Bar, Card, Chip } from '../components/ui'
 import { setBrand, useBrand, type BrandCountry, type BrandSlot } from '../lib/brand'
 import { getIncomeCfg, setIncomeCfg, useIncomeCfg } from '../lib/income'
 import { supabase, supabaseReady } from '../lib/supabase'
+import ChallengeReports from '../modules/challenge/Reports'
 import { useEffect } from 'react'
 import './admin.css'
 
@@ -569,7 +570,7 @@ export default function Admin() {
   const nav = useNavigate()
   const { user } = useApp()
   const [section, setSection] = useState<Section>('dashboard')
-  const [chTab, setChTab] = useState<'progress' | 'curriculum'>('progress')
+  const [chTab, setChTab] = useState<'progress' | 'curriculum' | 'reports'>('progress')
   const [callerTab, setCallerTab] = useState<CallerTab>('overview')
   const [team, setTeam] = useState<Team>('ALL')
   const [agents, setAgents] = useState(SEED_AGENTS)
@@ -1354,16 +1355,18 @@ export default function Admin() {
           {section === 'challenge' && (
             <>
               <div className="mb-4 flex gap-1.5">
-                {(['progress', 'curriculum'] as const).map((ct) => (
+                {(['progress', 'curriculum', 'reports'] as const).map((ct) => (
                   <button key={ct} type="button" onClick={() => setChTab(ct)}
                     className={clsx('cursor-pointer rounded-full border px-4 py-2 text-xs font-extrabold capitalize', chTab === ct ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-ink')}>
-                    {ct === 'progress' ? '📊 Progress' : '✏️ Curriculum'}
+                    {ct === 'progress' ? '📊 Progress' : ct === 'curriculum' ? '✏️ Curriculum' : '📄 Reports'}
                   </button>
                 ))}
               </div>
               {chTab === 'progress'
                 ? <ChallengeProgress realId={supabaseReady && user.id.includes('-')} />
-                : <CurriculumEditor realId={supabaseReady && user.id.includes('-')} onSaved={say} />}
+                : chTab === 'curriculum'
+                  ? <CurriculumEditor realId={supabaseReady && user.id.includes('-')} onSaved={say} />
+                  : <ChallengeReports realId={supabaseReady && user.id.includes('-')} />}
             </>
           )}
 
