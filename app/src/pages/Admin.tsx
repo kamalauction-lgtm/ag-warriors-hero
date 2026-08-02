@@ -3,7 +3,7 @@
    Booths · Caller/M4U (one function, with its own sub-tabs) · Content ·
    Rewards · Country Settings */
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Users,
@@ -575,6 +575,18 @@ export default function Admin() {
   const [agents, setAgents] = useState(SEED_AGENTS)
   const [leads, setLeads] = useState(SEED_LEADS)
   const [toast, setToast] = useState('')
+  const [unread, setUnread] = useState(0)
+  useEffect(() => {
+    if (!supabaseReady || !supabase || !user || !user.id.includes('-')) return
+    const poll = async () => {
+      const { count } = await supabase!.from('notifications')
+        .select('id', { count: 'exact', head: true }).eq('to_agent', user.id).eq('read', false)
+      setUnread(count ?? 0)
+    }
+    poll()
+    const t = setInterval(poll, 30000)
+    return () => clearInterval(t)
+  }, [user])
 
   const say = (m: string) => {
     setToast(m)
@@ -679,6 +691,13 @@ export default function Admin() {
               </button>
             ))}
           </div>
+          <Link to="/notifications" aria-label="Notifications"
+            className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink">
+            <BellRing size={16} />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-extrabold text-on-accent">{unread}</span>
+            )}
+          </Link>
           <Avatar name={user.name} color="var(--accent)" size={34} />
         </header>
 
