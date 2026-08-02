@@ -1,0 +1,144 @@
+/* TIM ELIT — army command theme, ported from production app.css L433–624.
+   Self-contained palette so it reads as a distinct "elite" zone. */
+.elite-zone {
+  --ez-bg: #11130d;
+  --ez-panel: #22260f;
+  --ez-card2: #161a0b;
+  --ez-deep: #14180a;
+  --ez-line: #3a3f1f;
+  --ez-olive: #494a17;
+  --ez-olive2: #6d7028;
+  --ez-gold: #b08a3a;
+  --ez-gold2: #d8b25a;
+  --ez-red: #a5281c;
+  --ez-red2: #c8392a;
+  --ez-cream: #e9e2cc;
+  --ez-cream2: #c9c2a8;
+  --ez-muted: #9a9374;
+  background: var(--ez-bg);
+  color: var(--ez-cream);
+  min-height: 100%;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.ez-osw { font-family: 'Oswald', 'Bebas Neue', system-ui, sans-serif; }
+
+/* camo diagonal stripes — the signature texture */
+.ez-camo {
+  background:
+    repeating-linear-gradient(45deg, rgba(109, 112, 40, 0.18) 0 10px, rgba(73, 74, 23, 0.18) 10px 20px),
+    linear-gradient(180deg, #22260f, #161a0b);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(216, 178, 90, 0.12);
+}
+.ez-crest {
+  background:
+    repeating-linear-gradient(45deg, rgba(109, 112, 40, 0.16) 0 12px, rgba(73, 74, 23, 0.16) 12px 24px),
+    linear-gradient(180deg, #22260f, #11130d);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+.ez-badge-box {
+  width: 60px; height: 60px; border-radius: 12px;
+  border: 2px solid var(--ez-olive2);
+  background: var(--ez-deep);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden; flex-shrink: 0;
+}
+.ez-card {
+  background: linear-gradient(180deg, #22260f, #161a0b);
+  border: 1px solid var(--ez-line);
+  border-radius: 14px;
+  min-height: 118px;
+  position: relative;
+  text-align: left;
+  padding: 14px;
+  color: var(--ez-cream);
+  width: 100%;
+}
+.ez-card--live { border-color: var(--ez-olive2); cursor: pointer; transition: border-color 0.2s; }
+.ez-card--live:hover { border-color: var(--ez-gold2); }
+.ez-card--live:active { background: linear-gradient(180deg, #2a2f12, #181c0c); }
+.ez-soon {
+  position: absolute; top: 10px; right: 10px;
+  background: var(--ez-muted); color: var(--ez-bg);
+  font-size: 0.6rem; letter-spacing: 0.08em; text-transform: uppercase;
+  border-radius: 999px; padding: 2px 8px; font-weight: 700;
+}
+.ez-pill {
+  display: inline-block; border-radius: 999px; padding: 2px 9px;
+  font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700;
+  color: #1a1407;
+  background: linear-gradient(180deg, #d8b25a, #b08a3a);
+  border: 1px solid var(--ez-olive2);
+}
+.ez-count {
+  position: absolute; top: 10px; right: 10px;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 999px; font-size: 0.7rem; font-weight: 800;
+  background: var(--ez-red2); color: #fff;
+}
+.ez-gold-btn {
+  background: linear-gradient(180deg, #d8b25a, #b08a3a);
+  color: #1a1407; border: 1px solid var(--ez-olive2);
+  border-radius: 12px; font-weight: 800; cursor: pointer;
+  transition: opacity 0.2s;
+}
+.ez-gold-btn:hover { opacity: 0.9; }
+.ez-ghost-btn {
+  background: transparent; color: var(--ez-cream);
+  border: 1px solid var(--ez-line); border-radius: 12px; cursor: pointer;
+  transition: border-color 0.2s;
+}
+.ez-ghost-btn:hover { border-color: var(--ez-olive2); }
+.ez-danger-btn {
+  background: linear-gradient(180deg, #c8392a, #a5281c);
+  color: #fff; border: 1px solid #6b2018; border-radius: 12px; cursor: pointer;
+}
+.ez-input {
+  width: 100%; background: var(--ez-deep); color: var(--ez-cream);
+  border: 1px solid var(--ez-line); border-radius: 10px;
+  padding: 10px 12px; font-size: 14px; outline: none;
+}
+.ez-input:focus { border-color: var(--ez-gold); }
+.ez-bar-track { background: #2a2f12; border-radius: 999px; height: 7px; overflow: hidden; }
+.ez-bar-fill { background: linear-gradient(90deg, #6d7028, #d8b25a); height: 100%; border-radius: 999px; transition: width 0.3s ease; }
+.ez-kpi-fill { background: linear-gradient(90deg, #b08a3a, #d8b25a); height: 100%; border-radius: 999px; transition: width 0.3s ease; }
+
+/* segment (hijau/kuning/merah) */
+.ez-seg { border-radius: 8px; padding: 4px 10px; font-size: 0.7rem; font-weight: 800; border: 1px solid var(--ez-line); background: transparent; cursor: pointer; }
+.ez-seg--hijau.on { background: #18371f; color: #3fae6a; border-color: #3fae6a; }
+.ez-seg--kuning.on { background: #352b10; color: #e0b84f; border-color: #e0b84f; }
+.ez-seg--merah.on { background: #361b1a; color: #d0433a; border-color: #d0433a; }
+.ez-seg:not(.on) { color: var(--ez-muted); }
+.ez-dot { width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0; }
+.ez-dot--hijau { background: #3fae6a; }
+.ez-dot--kuning { background: #e0b84f; }
+.ez-dot--merah { background: #d0433a; }
+.ez-dot--none { background: var(--ez-line); }
+
+/* lead status pills — exact production colors */
+.ez-lead { border-radius: 999px; padding: 2px 9px; font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; }
+.ez-lead--new { background: #2a3550; color: #bcd0ff; }
+.ez-lead--called { background: #3a2f12; color: #c8a064; }
+.ez-lead--booked { background: #1f3d2b; color: #7fe0a3; }
+.ez-lead--noanswer { background: #3a2f12; color: #d8b25a; }
+.ez-lead--notinterested { background: #3a1f1f; color: #f0a3a3; }
+.ez-lead--callback { background: #40320a; color: #ffd679; border: 1px solid #6b5416; }
+
+/* tabs */
+.ez-tab { background: var(--ez-deep); color: var(--ez-muted); border: 1px solid var(--ez-line); border-radius: 999px; padding: 6px 12px; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; white-space: nowrap; }
+.ez-tab.on { background: linear-gradient(180deg, #d8b25a, #b08a3a); color: #1a1407; border-color: var(--ez-olive2); }
+
+/* bottom-sheet modal */
+.ez-modal { position: fixed; inset: 0; background: #000c; display: flex; align-items: flex-end; justify-content: center; z-index: 100; }
+.ez-modal__card {
+  width: 100%; max-width: 640px; max-height: 90vh; overflow-y: auto;
+  background: var(--ez-bg); color: var(--ez-cream);
+  border: 1px solid var(--ez-line); border-bottom: none;
+  border-radius: 18px 18px 0 0; padding: 18px 16px 28px;
+}
+.ez-slider { width: 100%; accent-color: #b08a3a; }
+.ez-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.ez-table th { color: var(--ez-muted); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.06em; text-align: right; padding: 6px 4px; border-bottom: 1px solid var(--ez-line); }
+.ez-table th:first-child, .ez-table td:first-child { text-align: left; }
+.ez-table td { padding: 7px 4px; text-align: right; border-bottom: 1px solid rgba(58, 63, 31, 0.5); }

@@ -1,0 +1,177 @@
+/* Admin Console — "Command HQ" visual layer (black + gold AG identity) */
+
+/* ---- sidebar ---- */
+.adm-side {
+  background:
+    radial-gradient(120% 60% at 0% 0%, rgba(212, 172, 74, 0.08) 0%, transparent 55%),
+    var(--surface);
+}
+.adm-crest {
+  background: linear-gradient(135deg, #d4ac4a 0%, #a87e2c 60%, #8a6420 100%);
+  box-shadow: 0 4px 14px rgba(212, 172, 74, 0.35);
+}
+.adm-nav-item {
+  position: relative;
+  transition: color 0.15s, background 0.15s;
+}
+.adm-nav-item.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.adm-nav-item.on::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 99px;
+  background: linear-gradient(180deg, #d4ac4a, #a87e2c);
+  box-shadow: 0 0 8px rgba(212, 172, 74, 0.6);
+}
+
+/* ---- hero banner ---- */
+.adm-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(212, 172, 74, 0.25);
+  background:
+    radial-gradient(60% 120% at 85% 0%, rgba(212, 172, 74, 0.22) 0%, transparent 55%),
+    radial-gradient(40% 90% at 10% 100%, rgba(212, 172, 74, 0.1) 0%, transparent 60%),
+    linear-gradient(140deg, #101014 0%, #171510 55%, #1c1810 100%);
+  color: #f3f5f7;
+}
+.adm-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+}
+.adm-hero-shield {
+  position: absolute;
+  right: -30px;
+  bottom: -40px;
+  width: 190px;
+  opacity: 0.1;
+  pointer-events: none;
+}
+
+/* gradient gold numerals */
+.adm-gold {
+  background: linear-gradient(120deg, #f0d488 0%, #d4ac4a 45%, #b08a3a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- KPI cards ---- */
+.adm-kpi {
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface) 0%, color-mix(in srgb, var(--surface) 88%, var(--accent) 4%) 100%);
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s, border-color 0.2s;
+}
+.adm-kpi:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 10px 26px -12px rgba(0, 0, 0, 0.45);
+}
+.adm-kpi-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+/* ---- attention tiles ---- */
+.adm-alert {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.9rem;
+  border: 1px solid;
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.18s, box-shadow 0.18s;
+}
+.adm-alert:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -12px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- bars & funnel ---- */
+.adm-track {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.adm-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #b08a3a, #f0d488);
+  transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.adm-fill--green { background: linear-gradient(90deg, #15803d, #4ade80); }
+.adm-fill--blue { background: linear-gradient(90deg, #1d4ed8, #60a5fa); }
+.adm-fill--red { background: linear-gradient(90deg, #b91c1c, #f87171); }
+.adm-fill--purple { background: linear-gradient(90deg, #6d28d9, #c4b5fd); }
+
+.adm-funnel-step {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-radius: 9px;
+  margin: 0 auto 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s;
+}
+.adm-funnel-step:hover { transform: scale(1.02); }
+
+/* ---- donut ---- */
+.adm-donut {
+  position: relative;
+  border-radius: 50%;
+}
+.adm-donut::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.adm-donut-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+/* ---- pulse badge ---- */
+@keyframes admPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
+  50% { box-shadow: 0 0 0 5px rgba(239, 68, 68, 0); }
+}
+.adm-pulse { animation: admPulse 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .adm-kpi, .adm-alert, .adm-funnel-step { transition: none; }
+  .adm-kpi:hover, .adm-alert:hover { transform: none; }
+  .adm-pulse { animation: none; }
+}

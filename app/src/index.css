@@ -1,0 +1,173 @@
+@import "tailwindcss";
+
+/* ---------- Design tokens mapped into Tailwind ---------- */
+@theme inline {
+  --font-display: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-border: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --radius-lg: 0.9rem;
+  --radius-xl: 1.15rem;
+  --radius-2xl: 1.5rem;
+}
+
+/* ---------- Light (default) ---------- */
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #eef1f4;
+  --border: #e4e7ec;
+  --text: #0e1116;
+  --text-muted: #5a6472;
+
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+
+  /* default accent = Malaysia gold */
+  --accent: #bf9530;
+  --accent-soft: rgba(191, 149, 48, 0.14);
+  --on-accent: #1a1408;
+
+  color-scheme: light;
+}
+
+/* ---------- Dark ---------- */
+:root[data-theme="dark"] {
+  --bg: #0a0b0d;
+  --surface: #141619;
+  --surface-2: #1d2025;
+  --border: #282c33;
+  --text: #f3f5f7;
+  --text-muted: #98a2b0;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #3b82f6;
+
+  --accent: #d4ac4a;
+  --accent-soft: rgba(212, 172, 74, 0.16);
+  --on-accent: #171207;
+
+  color-scheme: dark;
+}
+
+/* ---------- Country accent overrides ---------- */
+:root[data-country="ID"] {
+  --accent: #f5821f;
+  --accent-soft: rgba(245, 130, 31, 0.14);
+  --on-accent: #ffffff;
+}
+:root[data-country="ID"][data-theme="dark"] {
+  --accent: #ff9436;
+  --accent-soft: rgba(255, 148, 54, 0.16);
+  --on-accent: #1a0f04;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior-y: none;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+}
+
+/* subtle scrollbars */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* hide scrollbar utility for horizontal rails */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.safe-b { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+.safe-t { padding-top: max(env(safe-area-inset-top), 0px); }
+
+/* ---------- creative layer (user app) ---------- */
+.gold-text {
+  background: linear-gradient(120deg, #f0d488 0%, #d4ac4a 45%, #b08a3a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero-user {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  border: 1px solid rgba(212, 172, 74, 0.28);
+  background:
+    radial-gradient(70% 130% at 90% 0%, rgba(212, 172, 74, 0.2) 0%, transparent 55%),
+    linear-gradient(140deg, #101014 0%, #191610 100%);
+  color: #f3f5f7;
+}
+:root[data-country="ID"] .hero-user {
+  border-color: rgba(245, 130, 31, 0.35);
+  background:
+    radial-gradient(70% 130% at 90% 0%, rgba(245, 130, 31, 0.22) 0%, transparent 55%),
+    linear-gradient(140deg, #12100e 0%, #1d130a 100%);
+}
+.hero-mascot {
+  position: absolute;
+  right: 10px;
+  bottom: 12px;
+  width: 84px;
+  pointer-events: none;
+  border-radius: 14px;
+  transform: rotate(-6deg);
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.45);
+}
+.lift {
+  transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s, border-color 0.2s;
+}
+.lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.4);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lift, .lift:hover { transition: none; transform: none; }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-rise { animation: rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise { animation: none; }
+  * { transition-duration: 0.01ms !important; }
+}
