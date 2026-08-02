@@ -21,13 +21,15 @@ export default function ReviewQueue() {
 
   const load = useCallback(async () => {
     if (!isReal || !supabase) return
-    const { data: r } = await supabase.from('readiness_submissions')
-      .select('id,status,submitted_at,enrolments(participant_id,goal_30d,profiles(name))')
+    const { data: r, error: e1 } = await supabase.from('readiness_submissions')
+      .select('id,status,submitted_at,enrolments(participant_id,goal_30d,profiles!enrolments_participant_id_fkey(name))')
       .in('status', ['submitted', 'under_review']).order('submitted_at')
+    if (e1) say('⚠ ' + e1.message)
     setReady((r as unknown as ReadyRow[]) ?? [])
-    const { data: s } = await supabase.from('task_submissions')
-      .select('id,day_no,version,response,reflection,submitted_at,enrolments(participant_id,profiles(name))')
+    const { data: s, error: e2 } = await supabase.from('task_submissions')
+      .select('id,day_no,version,response,reflection,submitted_at,enrolments(participant_id,profiles!enrolments_participant_id_fkey(name))')
       .in('status', ['submitted', 'under_review']).order('submitted_at')
+    if (e2) say('⚠ ' + e2.message)
     setSubs((s as unknown as SubRow[]) ?? [])
   }, [isReal])
   useEffect(() => { load() }, [load])

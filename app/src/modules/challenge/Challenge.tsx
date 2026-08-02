@@ -62,7 +62,7 @@ export default function Challenge() {
       setSubs(m)
       const { data: pl } = await supabase.from('points_ledger').select('amount').eq('user_id', user!.id).eq('status', 'verified')
       setXp((pl ?? []).reduce((t: number, r: { amount: number }) => t + r.amount, 0))
-      const { data: lb } = await supabase.from('points_ledger').select('user_id, amount, profiles(name)').eq('cohort_id', e.cohort_id).eq('status', 'verified')
+      const { data: lb } = await supabase.from('points_ledger').select('user_id, amount, profiles!points_ledger_user_id_fkey(name)').eq('cohort_id', e.cohort_id).eq('status', 'verified')
       const agg: Record<string, { name: string; pts: number }> = {}
       ;(lb ?? []).forEach((r: { user_id: string; amount: number; profiles: { name: string } | null }) => {
         agg[r.user_id] = { name: r.profiles?.name ?? 'Warrior', pts: (agg[r.user_id]?.pts ?? 0) + r.amount }
