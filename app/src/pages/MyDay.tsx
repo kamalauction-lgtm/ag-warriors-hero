@@ -76,14 +76,14 @@ export default function MyDay() {
           >
             {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </button>
-          <button
-            type="button"
+          <Link
+            to="/notifications"
             aria-label="Notifications"
             className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted transition-colors duration-200 hover:text-ink"
           >
             <Bell size={16} />
             <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-danger" />
-          </button>
+          </Link>
         </div>
       </header>
 

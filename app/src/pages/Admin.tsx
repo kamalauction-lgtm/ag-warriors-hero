@@ -43,6 +43,95 @@ import { supabase, supabaseReady } from '../lib/supabase'
 import { useEffect } from 'react'
 import './admin.css'
 
+/* Curriculum editor — DB-driven days, per-language editing (Super Admin) */
+const LANGS = ['en', 'ms-MY', 'id-ID'] as const
+type J = Record<string, string>
+interface CurDay {
+  id: string; day_no: number; phase: number; xp_amount: number
+  title: J; objective: J; content: J; required_action: J
+  evidence_requirement: J; reflection_question: J
+}
+function CurriculumEditor({ realId, onSaved }: { realId: boolean; onSaved: (m: string) => void }) {
+  const [days, setDays] = useState<CurDay[]>([])
+  const [lang, setLang] = useState<(typeof LANGS)[number]>('en')
+  const [open, setOpen] = useState<number | null>(null)
+  const [draft, setDraft] = useState<Partial<CurDay>>({})
+  useEffect(() => {
+    if (!realId || !supabase) return
+    supabase.from('curriculum_days').select('*').order('day_no')
+      .then(({ data }) => setDays((data as CurDay[]) ?? []))
+  }, [realId])
+  if (!realId) return <Card className="p-6 text-center text-sm text-muted">Sign in with your real account to edit the live curriculum.</Card>
+  const F: [keyof CurDay, string][] = [
+    ['title', 'Title'], ['objective', 'Objective'], ['content', 'Learning content'],
+    ['required_action', 'Required action'], ['evidence_requirement', 'Evidence'], ['reflection_question', 'Reflection'],
+  ]
+  const save = async (d: CurDay) => {
+    if (!supabase) return
+    const patch: Record<string, unknown> = {}
+    F.forEach(([k]) => {
+      const dv = draft[k] as J | undefined
+      if (dv) patch[k as string] = { ...(d[k] as J), ...dv }
+    })
+    if (draft.xp_amount != null) patch.xp_amount = draft.xp_amount
+    const { error } = await supabase.from('curriculum_days').update(patch).eq('id', d.id)
+    if (error) onSaved('⚠ ' + error.message)
+    else {
+      onSaved(`Day ${d.day_no} saved (${lang}) — live for all cohorts on v1`)
+      setDays((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...patch } as CurDay : x)))
+      setDraft({}); setOpen(null)
+    }
+  }
+  return (
+    <>
+      <div className="mb-3 flex items-center gap-1.5">
+        {LANGS.map((l) => (
+          <button key={l} type="button" onClick={() => setLang(l)}
+            className={clsx('cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-extrabold', lang === l ? 'border-accent bg-accent text-on-accent' : 'border-border text-muted hover:text-ink')}>
+            {l}
+          </button>
+        ))}
+        <Chip tone="accent" className="ml-auto">DB-driven · edits go live instantly</Chip>
+      </div>
+      <div className="space-y-1.5">
+        {days.map((d) => (
+          <Card key={d.id} className="overflow-hidden">
+            <button type="button" onClick={() => { setOpen(open === d.day_no ? null : d.day_no); setDraft({}) }}
+              className="flex w-full cursor-pointer items-center gap-3 p-3 text-left">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft font-display text-xs font-extrabold text-accent">{d.day_no}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-bold">{d.title?.[lang] ?? d.title?.en}</span>
+              <Chip>P{d.phase}</Chip><Chip tone="accent">{d.xp_amount} XP</Chip>
+            </button>
+            {open === d.day_no && (
+              <div className="border-t border-border bg-surface2/40 p-3.5">
+                {F.map(([k, label]) => (
+                  <div key={k as string} className="mb-2.5">
+                    <label className="mb-1 block text-[10px] font-bold uppercase text-muted">{label} · {lang}</label>
+                    <textarea rows={k === 'content' ? 3 : 2}
+                      defaultValue={(d[k] as J)?.[lang] ?? ''}
+                      onChange={(e) => setDraft((dr) => ({ ...dr, [k]: { ...((dr[k] as J) ?? {}), [lang]: e.target.value } }))}
+                      className="w-full rounded-xl border border-border bg-surface p-2.5 text-sm outline-none focus:border-accent" />
+                  </div>
+                ))}
+                <div className="flex items-center gap-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">XP</label>
+                  <input type="number" defaultValue={d.xp_amount}
+                    onChange={(e) => setDraft((dr) => ({ ...dr, xp_amount: Number(e.target.value) || d.xp_amount }))}
+                    className="w-20 rounded-lg border border-border bg-surface px-2 py-1.5 text-center text-sm font-bold outline-none focus:border-accent" />
+                  <button type="button" onClick={() => save(d)}
+                    className="ml-auto cursor-pointer rounded-xl bg-accent px-5 py-2.5 text-xs font-extrabold text-on-accent hover:opacity-90">
+                    💾 Save Day {d.day_no}
+                  </button>
+                </div>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </>
+  )
+}
+
 /* 30-Day Challenge — programme progress (Master Mentor view, live DB) */
 interface ChRow {
   id: string; status: string; catch_up: boolean; cohort_id: string
@@ -480,6 +569,7 @@ export default function Admin() {
   const nav = useNavigate()
   const { user } = useApp()
   const [section, setSection] = useState<Section>('dashboard')
+  const [chTab, setChTab] = useState<'progress' | 'curriculum'>('progress')
   const [callerTab, setCallerTab] = useState<CallerTab>('overview')
   const [team, setTeam] = useState<Team>('ALL')
   const [agents, setAgents] = useState(SEED_AGENTS)
@@ -1241,9 +1331,21 @@ export default function Admin() {
             </>
           )}
 
-          {/* ============ 30-DAY CHALLENGE PROGRESS ============ */}
+          {/* ============ 30-DAY CHALLENGE ============ */}
           {section === 'challenge' && (
-            <ChallengeProgress realId={supabaseReady && user.id.includes('-')} />
+            <>
+              <div className="mb-4 flex gap-1.5">
+                {(['progress', 'curriculum'] as const).map((ct) => (
+                  <button key={ct} type="button" onClick={() => setChTab(ct)}
+                    className={clsx('cursor-pointer rounded-full border px-4 py-2 text-xs font-extrabold capitalize', chTab === ct ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-ink')}>
+                    {ct === 'progress' ? '📊 Progress' : '✏️ Curriculum'}
+                  </button>
+                ))}
+              </div>
+              {chTab === 'progress'
+                ? <ChallengeProgress realId={supabaseReady && user.id.includes('-')} />
+                : <CurriculumEditor realId={supabaseReady && user.id.includes('-')} onSaved={say} />}
+            </>
           )}
 
           {/* ============ APP CONTENT ============ */}
