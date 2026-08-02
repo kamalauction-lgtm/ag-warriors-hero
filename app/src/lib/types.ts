@@ -27,6 +27,9 @@ export interface User {
   points: number
   level: number
   levelName: string
+  /* false = must pass the onboarding gate (M1) before the app unlocks */
+  onboarded?: boolean
+  pendingApproval?: boolean
 }
 
 export interface Deal {

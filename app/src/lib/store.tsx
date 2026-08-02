@@ -23,6 +23,8 @@ interface AppState {
   authReady: boolean
   login: (u: User) => void
   authLogin: (email: string, password: string) => Promise<string | null>
+  completeOnboarding: () => void
+  approveDemo: () => void
   logout: () => void
   setLocale: (l: Locale) => void
   toggleTheme: () => void
@@ -121,6 +123,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     supabase?.auth.signOut()
     setUser(null)
   }, [])
+  /* onboarding gate helpers — live build: update profiles.onboarded + notify leader */
+  const completeOnboarding = useCallback(() => {
+    setUser((u) => (u ? { ...u, onboarded: true } : u))
+    if (supabase && user?.id && !user.id.startsWith('demo_'))
+      supabase.from('profiles').update({ onboarded: true }).eq('id', user.id).then(() => {})
+  }, [user?.id])
+  const approveDemo = useCallback(
+    () => setUser((u) => (u ? { ...u, pendingApproval: false } : u)),
+    [],
+  )
   const toggleTheme = useCallback(
     () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
     [],
@@ -129,8 +141,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const t = useCallback((key: string) => translate(locale, key), [locale])
 
   const value = useMemo(
-    () => ({ user, locale, theme, country, authReady, login, authLogin, logout, setLocale, toggleTheme, t }),
-    [user, locale, theme, country, authReady, login, authLogin, logout, setLocale, toggleTheme, t],
+    () => ({ user, locale, theme, country, authReady, login, authLogin, completeOnboarding, approveDemo, logout, setLocale, toggleTheme, t }),
+    [user, locale, theme, country, authReady, login, authLogin, completeOnboarding, approveDemo, logout, setLocale, toggleTheme, t],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

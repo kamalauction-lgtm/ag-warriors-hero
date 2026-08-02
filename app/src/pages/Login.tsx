@@ -119,6 +119,23 @@ export default function Login() {
         </p>
 
         {/* Demo personas */}
+        {/* new-warrior registration demo → onboarding gate */}
+        <button
+          type="button"
+          onClick={() =>
+            login({
+              id: 'demo_new', name: 'Danish Iman', phone: '+60 19-555 6677',
+              email: 'danish@demo.my', country: detected ?? 'MY', role: 'agent',
+              careerRank: 'REN', isElite: false, avatarColor: '#10b981',
+              points: 0, level: 1, levelName: 'Rookie',
+              onboarded: false, pendingApproval: true,
+            })
+          }
+          className="lift mb-6 w-full cursor-pointer rounded-xl border border-dashed border-accent/60 bg-accent-soft/40 p-3.5 text-sm font-extrabold text-accent"
+        >
+          📝 Daftar — new warrior (onboarding demo)
+        </button>
+
         <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
           Demo preview (mock data)
         </p>

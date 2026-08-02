@@ -12,11 +12,14 @@ import Elite from './pages/Elite'
 import Poster from './pages/Poster'
 import Grow from './pages/Grow'
 import Admin from './pages/Admin'
+import Onboarding from './pages/Onboarding'
 
 export default function App() {
   const { user } = useApp()
 
   if (!user) return <Login />
+  // production M1 rule: nothing unlocks until onboarding is complete
+  if (user.onboarded === false) return <Onboarding />
 
   const isAdmin = user.role === 'master_admin' || user.role === 'country_admin'
   // Production gating: Tim Elit = elite members only (admins can monitor);
