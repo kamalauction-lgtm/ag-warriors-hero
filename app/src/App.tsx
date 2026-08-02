@@ -1,5 +1,6 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useApp } from './lib/store'
+import Join from './pages/Join'
 import Shell from './components/Shell'
 import Login from './pages/Login'
 import MyDay from './pages/MyDay'
@@ -21,7 +22,16 @@ import Notifications from './pages/Notifications'
 
 export default function App() {
   const { user } = useApp()
+  const { pathname } = useLocation()
 
+  // public invitation acceptance (§21) — reachable with or without a session
+  if (pathname.startsWith('/join/')) {
+    return (
+      <Routes>
+        <Route path="/join/:code" element={<Join />} />
+      </Routes>
+    )
+  }
   if (!user) return <Login />
   // production M1 rule: nothing unlocks until onboarding is complete
   if (user.onboarded === false) return <Onboarding />

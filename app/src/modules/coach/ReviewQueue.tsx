@@ -25,6 +25,9 @@ export default function ReviewQueue() {
   const [pcj, setPcj] = useState<PcjRow[]>([])
   const [people, setPeople] = useState<Participant[]>([])
   const [rp, setRp] = useState({ who: '', period: 'Week 1', strengths: '', progress: '', barriers: '', actions: '', next: '' })
+  const [nv, setNv] = useState({ name: '', phone: '', country: 'MY', cohort: '' })
+  const [nvCohorts, setNvCohorts] = useState<{ id: string; name: string }[]>([])
+  const [lastInvite, setLastInvite] = useState<{ code: string; name: string; phone: string } | null>(null)
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
 
   const load = useCallback(async () => {
@@ -53,6 +56,8 @@ export default function ReviewQueue() {
       .select('participant_id,profiles!enrolments_participant_id_fkey(name)')
     setPeople(((es ?? []) as unknown as { participant_id: string; profiles: { name: string } | null }[])
       .map((e) => ({ participant_id: e.participant_id, name: e.profiles?.name ?? 'Warrior' })))
+    const { data: cos } = await supabase.from('cohorts').select('id,name').in('status', ['open', 'active'])
+    setNvCohorts((cos as { id: string; name: string }[]) ?? [])
   }, [isReal])
   useEffect(() => { load() }, [load])
 
@@ -154,6 +159,54 @@ export default function ReviewQueue() {
               </div>
             </Card>
           ))}
+
+          {/* ---- Invite a warrior (§6 INVITED / §21) — WhatsApp delivery only ---- */}
+          <SectionTitle className="mt-5">➕ Invite a warrior</SectionTitle>
+          <Card className="mb-4 p-4">
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              <input value={nv.name} placeholder="Full name" onChange={(e) => setNv({ ...nv, name: e.target.value })}
+                className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+              <input value={nv.phone} placeholder="+60 / +62 phone" onChange={(e) => setNv({ ...nv, phone: e.target.value })}
+                className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+              <select value={nv.country} onChange={(e) => setNv({ ...nv, country: e.target.value })}
+                className="h-11 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
+                <option value="MY">🇲🇾 Malaysia</option><option value="ID">🇮🇩 Indonesia</option>
+              </select>
+              <select value={nv.cohort} onChange={(e) => setNv({ ...nv, cohort: e.target.value })}
+                className="h-11 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
+                <option value="">Cohort (optional)</option>
+                {nvCohorts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <button type="button" disabled={!nv.name || !nv.phone}
+              onClick={async () => {
+                if (!supabase) return
+                const { data, error } = await supabase.rpc('fn_create_invitation', {
+                  p_name: nv.name, p_phone: nv.phone.replace(/[\s-]/g, ''),
+                  p_country: nv.country, p_cohort: nv.cohort || null,
+                })
+                if (error) say('⚠ ' + error.message)
+                else {
+                  setLastInvite({ code: data as string, name: nv.name, phone: nv.phone.replace(/[\s-]/g, '') })
+                  setNv({ name: '', phone: '', country: 'MY', cohort: '' })
+                  say('✉ Invitation created')
+                }
+              }}
+              className="h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">
+              Create invitation
+            </button>
+            {lastInvite && (
+              <div className="mt-3 rounded-xl border border-success/40 bg-success/10 p-3 text-center">
+                <p className="text-xs font-bold">Invite for {lastInvite.name} — code {lastInvite.code}</p>
+                <a target="_blank" rel="noreferrer"
+                  href={`https://wa.me/${lastInvite.phone.replace('+', '')}?text=${encodeURIComponent(
+                    `Salam ${lastInvite.name}! 🛡 You are invited to join IQI AG Hero — our Warriors platform. Accept here: https://hero.iqiaggroup.com/#/join/${lastInvite.code}`)}`}
+                  className="mt-2 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-xl bg-success text-xs font-extrabold text-white">
+                  📲 Send via WhatsApp
+                </a>
+              </div>
+            )}
+          </Card>
 
           {/* ---- Coaching report (§16) ---- */}
           <SectionTitle className="mt-5">🧭 Coaching report — write & share</SectionTitle>
