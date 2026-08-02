@@ -8,12 +8,13 @@ import {
   ChevronRight,
   LogOut,
 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { useApp } from '../lib/store'
 import { getRewards } from '../lib/mockData'
 import { Bar, Card, Chip, SectionTitle } from '../components/ui'
 
 const TILES = [
-  { icon: Rocket, title: '30-Day Closing Challenge', sub: 'Day 12 of 30 · keep going', accent: true },
+  { icon: Rocket, title: '30-Day Closing Challenge', sub: 'Live module — enrol now', accent: true, to: '/challenge' },
   { icon: GraduationCap, title: 'AG Academy', sub: 'Playbook · Calling → Closing' },
   { icon: Camera, title: 'Social Coaching', sub: 'Captions & daily activity' },
   { icon: Library, title: 'ATLAS Library', sub: 'Guides, docs & tools' },
@@ -22,6 +23,7 @@ const TILES = [
 
 export default function Grow() {
   const { user, t, logout } = useApp()
+  const nav = useNavigate()
   if (!user) return null
   const rewards = getRewards(user.country)
 
@@ -40,7 +42,7 @@ export default function Grow() {
         {TILES.map((tile) => (
           <Card
             key={tile.title}
-            onClick={() => {}}
+            onClick={() => { if ('to' in tile && tile.to) nav(tile.to) }}
             className={
               tile.accent
                 ? 'flex items-center gap-3 border-accent/40 bg-accent-soft p-4'

@@ -13,6 +13,8 @@ import Poster from './pages/Poster'
 import Grow from './pages/Grow'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
+import Challenge from './modules/challenge/Challenge'
+import ReviewQueue from './modules/coach/ReviewQueue'
 
 export default function App() {
   const { user } = useApp()
@@ -46,6 +48,8 @@ export default function App() {
           element={canPoster ? <Poster /> : <Navigate to="/team" replace />}
         />
         <Route path="/grow" element={<Grow />} />
+        <Route path="/challenge" element={<Challenge />} />
+        <Route path="/coach" element={<ReviewQueue />} />
         <Route
           path="/admin"
           element={isAdmin ? <Admin /> : <Navigate to="/" replace />}
