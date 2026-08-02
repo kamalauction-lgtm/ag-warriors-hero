@@ -37,6 +37,7 @@ export default function Journey() {
       supabase.from('ch_closings').select('id').eq('participant_id', user!.id).eq('status', 'COMPLETED').limit(1),
       supabase.from('mentor_points_ledger').select('amount').eq('user_id', user!.id).eq('status', 'verified'),
     ])
+    if (s.error) say('⚠ steps: ' + s.error.message)
     setSteps((s.data as Step[]) ?? [])
     const map: Record<string, Prog> = {}
     ;((p.data as Prog[]) ?? []).forEach((r) => { map[r.step_code] = r })
