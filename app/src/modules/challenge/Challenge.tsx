@@ -213,6 +213,16 @@ export default function Challenge() {
               )
             })}
           </div>
+          <Link to="/pipeline" className="mb-4 block">
+            <Card className="flex items-center gap-3 p-3.5">
+              <span className="text-xl">📇</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold">My Pipeline</p>
+                <p className="text-[11px] text-muted">Leads · appointments · closing records (human-verified)</p>
+              </div>
+              <Chip tone="accent">open</Chip>
+            </Card>
+          </Link>
           {reports.length > 0 && (
             <>
               <SectionTitle>🧭 Coaching reports</SectionTitle>

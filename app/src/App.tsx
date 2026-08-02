@@ -14,6 +14,7 @@ import Grow from './pages/Grow'
 import Admin from './pages/Admin'
 import Onboarding from './pages/Onboarding'
 import Challenge from './modules/challenge/Challenge'
+import Pipeline from './modules/challenge/Pipeline'
 import ReviewQueue from './modules/coach/ReviewQueue'
 import Notifications from './pages/Notifications'
 
@@ -50,6 +51,7 @@ export default function App() {
         />
         <Route path="/grow" element={<Grow />} />
         <Route path="/challenge" element={<Challenge />} />
+        <Route path="/pipeline" element={<Pipeline />} />
         <Route path="/coach" element={<ReviewQueue />} />
         <Route path="/notifications" element={<Notifications />} />
         <Route

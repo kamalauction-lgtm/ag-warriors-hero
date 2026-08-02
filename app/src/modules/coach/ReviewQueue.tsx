@@ -10,6 +10,7 @@ import { Card, Chip, SectionTitle } from '../../components/ui'
 interface Participant { participant_id: string; name: string }
 interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string; profiles: { name: string } | null } | null }
 interface SubRow { id: string; day_no: number; version: number; response: string; reflection: string; submitted_at: string; enrolments: { participant_id: string; profiles: { name: string } | null } | null }
+interface CloseRow { id: string; status: string; required_steps: string | null; project: string | null; ch_leads: { name: string } | null; profiles: { name: string } | null }
 
 export default function ReviewQueue() {
   const { user } = useApp()
@@ -18,6 +19,7 @@ export default function ReviewQueue() {
   const [subs, setSubs] = useState<SubRow[]>([])
   const [note, setNote] = useState('')
   const [toast, setToast] = useState('')
+  const [closings, setClosings] = useState<CloseRow[]>([])
   const [people, setPeople] = useState<Participant[]>([])
   const [rp, setRp] = useState({ who: '', period: 'Week 1', strengths: '', progress: '', barriers: '', actions: '', next: '' })
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
@@ -34,6 +36,11 @@ export default function ReviewQueue() {
       .in('status', ['submitted', 'under_review']).order('submitted_at')
     if (e2) say('⚠ ' + e2.message)
     setSubs((s as unknown as SubRow[]) ?? [])
+    const { data: cl, error: e3 } = await supabase.from('ch_closings')
+      .select('id,status,required_steps,project,ch_leads(name),profiles!ch_closings_participant_id_fkey(name)')
+      .eq('status', 'INTERNAL_REVIEW').order('updated_at')
+    if (e3) say('⚠ ' + e3.message)
+    setClosings((cl as unknown as CloseRow[]) ?? [])
     const { data: es } = await supabase.from('enrolments')
       .select('participant_id,profiles!enrolments_participant_id_fkey(name)')
     setPeople(((es ?? []) as unknown as { participant_id: string; profiles: { name: string } | null }[])
@@ -101,6 +108,25 @@ export default function ReviewQueue() {
               </div>
             </Card>
           ))}
+          {/* ---- Closing verification (§15) — human-only ---- */}
+          <SectionTitle className="mt-4">🏁 Closing verification ({closings.length})</SectionTitle>
+          {closings.length === 0 && <Card className="p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          {closings.map((c) => (
+            <Card key={c.id} className="mb-2.5 p-3.5">
+              <div className="mb-1 flex items-center gap-2">
+                <p className="text-sm font-bold">{c.profiles?.name ?? 'Warrior'}</p>
+                <Chip tone="accent">Lead: {c.ch_leads?.name ?? '—'}</Chip>
+              </div>
+              {c.required_steps && <p className="mb-2 rounded-lg bg-surface2 p-2 text-xs">{c.required_steps}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: true, p_note: note }, '🏆 Closing VERIFIED — +XP written to ledger')}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Verify closing</button>
+                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: false, p_note: note }, 'Sent back — more documentation needed')}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Not yet</button>
+              </div>
+            </Card>
+          ))}
+
           {/* ---- Coaching report (§16) ---- */}
           <SectionTitle className="mt-5">🧭 Coaching report — write & share</SectionTitle>
           <Card className="mb-6 p-4">
