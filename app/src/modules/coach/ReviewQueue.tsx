@@ -12,6 +12,7 @@ interface Participant { participant_id: string; name: string }
 interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string; profiles: { name: string } | null } | null }
 interface SubRow { id: string; day_no: number; version: number; response: string; reflection: string; submitted_at: string; enrolments: { participant_id: string; profiles: { name: string } | null } | null }
 interface CloseRow { id: string; status: string; required_steps: string | null; project: string | null; ch_leads: { name: string } | null; profiles: { name: string } | null }
+interface PcjRow { id: string; step_code: string; response: string | null; profiles: { name: string } | null }
 
 export default function ReviewQueue() {
   const { user } = useApp()
@@ -21,6 +22,7 @@ export default function ReviewQueue() {
   const [note, setNote] = useState('')
   const [toast, setToast] = useState('')
   const [closings, setClosings] = useState<CloseRow[]>([])
+  const [pcj, setPcj] = useState<PcjRow[]>([])
   const [people, setPeople] = useState<Participant[]>([])
   const [rp, setRp] = useState({ who: '', period: 'Week 1', strengths: '', progress: '', barriers: '', actions: '', next: '' })
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
@@ -42,6 +44,11 @@ export default function ReviewQueue() {
       .eq('status', 'INTERNAL_REVIEW').order('updated_at')
     if (e3) say('⚠ ' + e3.message)
     setClosings((cl as unknown as CloseRow[]) ?? [])
+    const { data: pj, error: e4 } = await supabase.from('pcj_progress')
+      .select('id,step_code,response,profiles!pcj_progress_participant_id_fkey(name)')
+      .eq('status', 'submitted').order('updated_at')
+    if (e4) say('⚠ ' + e4.message)
+    setPcj((pj as unknown as PcjRow[]) ?? [])
     const { data: es } = await supabase.from('enrolments')
       .select('participant_id,profiles!enrolments_participant_id_fkey(name)')
     setPeople(((es ?? []) as unknown as { participant_id: string; profiles: { name: string } | null }[])
@@ -125,6 +132,25 @@ export default function ReviewQueue() {
                   className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Verify closing</button>
                 <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: false, p_note: note }, 'Sent back — more documentation needed')}
                   className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Not yet</button>
+              </div>
+            </Card>
+          ))}
+
+          {/* ---- Post-closing journey review (§20) ---- */}
+          <SectionTitle className="mt-4">🎓 Journey steps ({pcj.length})</SectionTitle>
+          {pcj.length === 0 && <Card className="p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          {pcj.map((j) => (
+            <Card key={j.id} className="mb-2.5 p-3.5">
+              <div className="mb-1 flex items-center gap-2">
+                <p className="text-sm font-bold">{j.profiles?.name ?? 'Warrior'}</p>
+                <Chip tone="accent">{j.step_code.replaceAll('_', ' ')}</Chip>
+              </div>
+              {j.response && <p className="mb-2 rounded-lg bg-surface2 p-2 text-xs">{j.response}</p>}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: true, p_note: note }, '🎓 Step approved — Mentor Points awarded if configured')}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Approve</button>
+                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: false, p_note: note }, 'Revision requested')}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Revision</button>
               </div>
             </Card>
           ))}

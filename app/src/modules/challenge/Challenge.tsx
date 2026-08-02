@@ -213,6 +213,16 @@ export default function Challenge() {
               )
             })}
           </div>
+          <Link to="/journey" className="mb-2.5 block">
+            <Card className="flex items-center gap-3 p-3.5">
+              <span className="text-xl">🎓</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold">Post-Closing Journey</p>
+                <p className="text-[11px] text-muted">Reflection · service · recruit · teach → Elite Coach path</p>
+              </div>
+              <Chip tone="accent">open</Chip>
+            </Card>
+          </Link>
           <Link to="/pipeline" className="mb-4 block">
             <Card className="flex items-center gap-3 p-3.5">
               <span className="text-xl">📇</span>
