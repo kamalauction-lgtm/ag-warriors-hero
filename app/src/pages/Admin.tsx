@@ -32,13 +32,115 @@ import {
   AlertTriangle,
   Timer,
   BellRing,
+  Rocket,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { Avatar, Bar, Card, Chip } from '../components/ui'
 import { setBrand, useBrand, type BrandCountry, type BrandSlot } from '../lib/brand'
 import { getIncomeCfg, setIncomeCfg, useIncomeCfg } from '../lib/income'
+import { supabase, supabaseReady } from '../lib/supabase'
+import { useEffect } from 'react'
 import './admin.css'
+
+/* 30-Day Challenge — programme progress (Master Mentor view, live DB) */
+interface ChRow {
+  id: string; status: string; catch_up: boolean; cohort_id: string
+  participant_id: string
+  profiles: { name: string; country: string } | null
+  cohorts: { name: string } | null
+}
+function ChallengeProgress({ realId }: { realId: boolean }) {
+  const [rows, setRows] = useState<ChRow[]>([])
+  const [ready, setReady] = useState<Record<string, string>>({})
+  const [tasks, setTasks] = useState<Record<string, { sub: number; ok: number; last: string }>>({})
+  const [xp, setXp] = useState<Record<string, number>>({})
+  const [dayNow, setDayNow] = useState<Record<string, number>>({})
+  const [err, setErr] = useState('')
+
+  useEffect(() => {
+    if (!realId || !supabase) return
+    ;(async () => {
+      const { data: es, error } = await supabase.from('enrolments')
+        .select('id,status,catch_up,cohort_id,participant_id,profiles!enrolments_participant_id_fkey(name,country),cohorts(name)')
+        .order('created_at')
+      if (error) { setErr(error.message); return }
+      const list = (es as unknown as ChRow[]) ?? []
+      setRows(list)
+      const { data: rs } = await supabase.from('readiness_submissions')
+        .select('enrolment_id,status,created_at').order('created_at', { ascending: false })
+      const rm: Record<string, string> = {}
+      ;(rs ?? []).forEach((r: { enrolment_id: string; status: string }) => { if (!rm[r.enrolment_id]) rm[r.enrolment_id] = r.status })
+      setReady(rm)
+      const { data: ts } = await supabase.from('task_submissions').select('enrolment_id,day_no,status')
+      const tm: Record<string, { sub: number; ok: number; last: string }> = {}
+      ;(ts ?? []).forEach((t: { enrolment_id: string; day_no: number; status: string }) => {
+        const e = tm[t.enrolment_id] ?? { sub: 0, ok: 0, last: '' }
+        if (t.status === 'approved') e.ok++
+        else if (['submitted', 'under_review'].includes(t.status)) e.sub++
+        e.last = `D${t.day_no} ${t.status}`
+        tm[t.enrolment_id] = e
+      })
+      setTasks(tm)
+      const { data: pl } = await supabase.from('points_ledger').select('user_id,amount').eq('status', 'verified')
+      const xm: Record<string, number> = {}
+      ;(pl ?? []).forEach((p: { user_id: string; amount: number }) => { xm[p.user_id] = (xm[p.user_id] ?? 0) + p.amount })
+      setXp(xm)
+      const cids = [...new Set(list.map((r) => r.cohort_id))]
+      const dm: Record<string, number> = {}
+      for (const c of cids) {
+        const { data: d } = await supabase.rpc('cohort_day', { p_cohort: c })
+        dm[c] = (d as number) ?? 0
+      }
+      setDayNow(dm)
+    })()
+  }, [realId])
+
+  const STAGE: Record<string, 'success' | 'warning' | 'info' | 'accent' | 'default' | 'danger'> = {
+    active: 'success', onboarding: 'warning', invited: 'info', ready: 'accent',
+    completed: 'accent', graduated: 'success', paused: 'default', withdrawn: 'danger',
+  }
+  if (!realId) return <Card className="p-6 text-center text-sm text-muted">Sign in with your real account on production to see live programme data.</Card>
+  return (
+    <>
+      {err && <p className="mb-3 rounded-lg bg-danger/10 p-2 text-xs font-bold text-danger">⚠ {err}</p>}
+      <Card className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
+              <th className="px-4 py-3">Warrior</th><th className="px-2 py-3">Cohort</th>
+              <th className="px-2 py-3">Stage</th><th className="px-2 py-3">Readiness</th>
+              <th className="px-2 py-3">Day</th><th className="px-2 py-3">Tasks ✓/⏳</th>
+              <th className="px-2 py-3">Latest</th><th className="px-4 py-3 text-right">Verified XP</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-xs text-muted">No enrolments yet.</td></tr>}
+            {rows.map((r) => {
+              const t = tasks[r.id] ?? { sub: 0, ok: 0, last: '—' }
+              return (
+                <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
+                  <td className="px-4 py-3 font-semibold">
+                    {r.profiles?.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.profiles?.name ?? '—'}
+                    {r.catch_up && <Chip tone="warning" className="ml-1.5">catch-up</Chip>}
+                  </td>
+                  <td className="px-2 py-3 text-xs">{r.cohorts?.name ?? '—'}</td>
+                  <td className="px-2 py-3"><Chip tone={STAGE[r.status] ?? 'default'}>{r.status}</Chip></td>
+                  <td className="px-2 py-3"><Chip tone={ready[r.id] === 'approved' ? 'success' : ready[r.id] === 'submitted' ? 'warning' : 'default'}>{ready[r.id] ?? '—'}</Chip></td>
+                  <td className="px-2 py-3 font-bold">{dayNow[r.cohort_id] ?? '—'}/30</td>
+                  <td className="px-2 py-3">{t.ok} ✓ · {t.sub} ⏳</td>
+                  <td className="px-2 py-3 text-xs text-muted">{t.last}</td>
+                  <td className="px-4 py-3 text-right font-display font-extrabold text-accent">{xp[r.participant_id] ?? 0}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        <p className="p-4 text-[11px] text-muted">Stages: invited → onboarding → ready → active → completed → graduated. Approvals stay human-only in the Coach Queue.</p>
+      </Card>
+    </>
+  )
+}
 
 /* Income rules editor — full subsale engine constants, per country
    (ladder, agency max, OV rule, RGR tables, cap, properties) */
@@ -273,7 +375,7 @@ function BrandSlotEditor({
 
 type Section =
   | 'dashboard' | 'people' | 'sales' | 'activity' | 'elite' | 'booths'
-  | 'caller' | 'content' | 'rewards' | 'settings'
+  | 'caller' | 'content' | 'rewards' | 'settings' | 'challenge'
 type CallerTab =
   | 'overview' | 'leads' | 'pipelines' | 'projects' | 'fields'
   | 'import' | 'quotes' | 'bop' | 'reports' | 'audit'
@@ -299,6 +401,7 @@ const NAV: { group: string; items: { key: Section; icon: typeof Users; label: st
   {
     group: 'Functions',
     items: [
+      { key: 'challenge', icon: Rocket, label: '30-Day Challenge' },
       { key: 'caller', icon: PhoneCall, label: 'Caller · M4U', badge: 3 },
       { key: 'content', icon: FolderCog, label: 'App Content' },
       { key: 'rewards', icon: Gift, label: 'Rewards' },
@@ -1136,6 +1239,11 @@ export default function Admin() {
                 </Card>
               )}
             </>
+          )}
+
+          {/* ============ 30-DAY CHALLENGE PROGRESS ============ */}
+          {section === 'challenge' && (
+            <ChallengeProgress realId={supabaseReady && user.id.includes('-')} />
           )}
 
           {/* ============ APP CONTENT ============ */}
