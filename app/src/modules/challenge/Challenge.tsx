@@ -29,6 +29,7 @@ export default function Challenge() {
   const [subs, setSubs] = useState<Record<number, string>>({})
   const [xp, setXp] = useState(0)
   const [board, setBoard] = useState<{ name: string; pts: number }[]>([])
+  const [reports, setReports] = useState<{ id: string; period: string; strengths: string; progress: string; barriers: string; agreed_actions: string; next_review: string | null; status: string }[]>([])
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   // forms
@@ -68,6 +69,10 @@ export default function Challenge() {
         agg[r.user_id] = { name: r.profiles?.name ?? 'Warrior', pts: (agg[r.user_id]?.pts ?? 0) + r.amount }
       })
       setBoard(Object.values(agg).sort((a, b) => b.pts - a.pts).slice(0, 10))
+      const { data: cr } = await supabase.from('coaching_reports')
+        .select('id,period,strengths,progress,barriers,agreed_actions,next_review,status')
+        .eq('participant_id', user!.id).order('created_at', { ascending: false })
+      setReports((cr as typeof reports) ?? [])
     }
   }, [isReal, user])
 
@@ -208,6 +213,33 @@ export default function Challenge() {
               )
             })}
           </div>
+          {reports.length > 0 && (
+            <>
+              <SectionTitle>🧭 Coaching reports</SectionTitle>
+              <div className="mb-4 space-y-2.5">
+                {reports.map((cr) => (
+                  <Card key={cr.id} className="p-3.5">
+                    <div className="mb-1 flex items-center gap-2">
+                      <p className="flex-1 text-sm font-bold">{cr.period ?? 'Coaching report'}</p>
+                      <Chip tone={cr.status === 'shared' ? 'warning' : 'success'}>{cr.status}</Chip>
+                    </div>
+                    {cr.strengths && <p className="text-xs"><b>💪 Strengths:</b> {cr.strengths}</p>}
+                    {cr.progress && <p className="text-xs"><b>📈 Progress:</b> {cr.progress}</p>}
+                    {cr.barriers && <p className="text-xs"><b>🚧 Barriers:</b> {cr.barriers}</p>}
+                    {cr.agreed_actions && <p className="text-xs"><b>✅ Actions:</b> {cr.agreed_actions}</p>}
+                    {cr.next_review && <p className="mt-1 text-[11px] text-muted">Next review: {cr.next_review}</p>}
+                    {cr.status === 'shared' && (
+                      <button type="button" disabled={busy}
+                        onClick={() => rpc('fn_ack_report', { p_report: cr.id }, '✅ Acknowledged — Coach notified')}
+                        className="mt-2 h-10 w-full cursor-pointer rounded-xl bg-accent text-xs font-extrabold text-on-accent disabled:opacity-40">
+                        I acknowledge this report
+                      </button>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            </>
+          )}
           <SectionTitle>Leaderboard — verified XP only</SectionTitle>
           <Card className="divide-y divide-border">
             {board.length === 0 && <p className="p-4 text-center text-xs text-muted">No verified XP yet — be the first 🔥</p>}

@@ -7,6 +7,7 @@ import { useApp } from '../../lib/store'
 import { supabase, supabaseReady } from '../../lib/supabase'
 import { Card, Chip, SectionTitle } from '../../components/ui'
 
+interface Participant { participant_id: string; name: string }
 interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string; profiles: { name: string } | null } | null }
 interface SubRow { id: string; day_no: number; version: number; response: string; reflection: string; submitted_at: string; enrolments: { participant_id: string; profiles: { name: string } | null } | null }
 
@@ -17,6 +18,8 @@ export default function ReviewQueue() {
   const [subs, setSubs] = useState<SubRow[]>([])
   const [note, setNote] = useState('')
   const [toast, setToast] = useState('')
+  const [people, setPeople] = useState<Participant[]>([])
+  const [rp, setRp] = useState({ who: '', period: 'Week 1', strengths: '', progress: '', barriers: '', actions: '', next: '' })
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
 
   const load = useCallback(async () => {
@@ -31,6 +34,10 @@ export default function ReviewQueue() {
       .in('status', ['submitted', 'under_review']).order('submitted_at')
     if (e2) say('⚠ ' + e2.message)
     setSubs((s as unknown as SubRow[]) ?? [])
+    const { data: es } = await supabase.from('enrolments')
+      .select('participant_id,profiles!enrolments_participant_id_fkey(name)')
+    setPeople(((es ?? []) as unknown as { participant_id: string; profiles: { name: string } | null }[])
+      .map((e) => ({ participant_id: e.participant_id, name: e.profiles?.name ?? 'Warrior' })))
   }, [isReal])
   useEffect(() => { load() }, [load])
 
@@ -94,6 +101,36 @@ export default function ReviewQueue() {
               </div>
             </Card>
           ))}
+          {/* ---- Coaching report (§16) ---- */}
+          <SectionTitle className="mt-5">🧭 Coaching report — write & share</SectionTitle>
+          <Card className="mb-6 p-4">
+            <select value={rp.who} onChange={(e) => setRp({ ...rp, who: e.target.value })}
+              className="mb-2 h-11 w-full cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
+              <option value="">Choose participant…</option>
+              {people.map((p) => <option key={p.participant_id} value={p.participant_id}>{p.name}</option>)}
+            </select>
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              <input value={rp.period} onChange={(e) => setRp({ ...rp, period: e.target.value })} placeholder="Period (e.g. Week 1)"
+                className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+              <input type="date" value={rp.next} onChange={(e) => setRp({ ...rp, next: e.target.value })} aria-label="Next review"
+                className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+            </div>
+            {([['strengths', 'Strengths'], ['progress', 'Progress'], ['barriers', 'Barriers'], ['actions', 'Agreed actions + due dates']] as const).map(([k, ph]) => (
+              <textarea key={k} rows={2} value={rp[k]} placeholder={ph}
+                onChange={(e) => setRp({ ...rp, [k]: e.target.value })}
+                className="mb-2 w-full rounded-xl border border-border bg-surface p-2.5 text-sm outline-none focus:border-accent" />
+            ))}
+            <button type="button" disabled={!rp.who || !rp.progress}
+              onClick={() => act('fn_share_report', {
+                p_participant: rp.who, p_period: rp.period,
+                p_strengths: rp.strengths, p_progress: rp.progress, p_barriers: rp.barriers,
+                p_actions: rp.actions, p_next_review: rp.next || null,
+              }, '🧭 Report shared — participant notified')}
+              className="h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">
+              Share report with participant
+            </button>
+            <p className="mt-2 text-[10px] text-muted">Comments must be professional, specific, linked to observable evidence (§16). No hidden scoring.</p>
+          </Card>
         </>
       )}
       {toast && <div className="fixed bottom-24 left-1/2 z-[200] w-[92%] max-w-sm -translate-x-1/2 rounded-xl bg-accent px-4 py-2.5 text-center text-xs font-bold text-on-accent shadow-lg">{toast}</div>}
