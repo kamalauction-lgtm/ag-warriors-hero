@@ -434,6 +434,16 @@ Reuse existing architecture. No second application for Indonesia. Do not hardcod
 MVP ready for controlled staging when: participant can onboard; country and language work; Coach can be assigned; readiness can be approved; 30-day roadmap works; tasks submit; evidence reviewed; revisions requested; verified XP works; leaderboard works; leads managed; appointments and viewings recorded; closing submitted and verified; coaching reports shared; post-closing actions work; Mentor Points traceable; roles and permissions enforced; audit records exist; MY and ID configuration works; mobile layouts work; critical automated tests pass; no Critical security issue remains; staging deployment instructions complete.
 
 ==================================================
+## 40a. BINDING CLARIFICATIONS (Kamal, 2026-08-02)
+==================================================
+
+**COHORT CLOCK — shared cohort calendar.** Each cohort has: official start date; official timezone; configured daily unlock time. Everyone in the same cohort follows the same programme day (cohort on Day 5 ⇒ all active participants on Day 5). Readiness must normally be approved before the cohort starts. Late readiness approval: do NOT backdate completion; Admin may move the participant to the next cohort, OR authorise a controlled catch-up pathway. A catch-up participant must remain visibly marked and must not gain an unfair leaderboard advantage. Leaderboard calculations use verified activity and the cohort's official challenge period. Malaysia and Indonesia may use separate cohorts and timezones within the same application; a cross-country cohort must have one explicitly configured official timezone.
+
+**TWO ONBOARDING LAYERS — confirmed.** The current working onboarding = the GLOBAL APP-ACCESS GATE and must be preserved (controls general access to IQI AG Hero). Challenge onboarding = a SEPARATE enrolment + readiness layer that begins after global onboarding (controls entry into the 30 Days Closing Challenge and Day 1 access). Do not duplicate existing profile information — reuse it; collect only challenge-specific fields: assigned cohort; assigned Elite Coach; experience level; initial pipeline baseline; 30-day goal; personal motivation; daily commitment; programme acknowledgements; readiness checklist. Keep the two status areas separate.
+
+END OF SPECIFICATION.
+
+==================================================
 ## 40. FIRST RESPONSE PROTOCOL
 ==================================================
 
