@@ -6,6 +6,7 @@ import { ArrowLeft, ShieldCheck, Check, RotateCcw } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { supabase, supabaseReady } from '../../lib/supabase'
 import { Card, Chip, SectionTitle } from '../../components/ui'
+import CoachBoard from './CoachBoard'
 
 interface Participant { participant_id: string; name: string }
 interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string; profiles: { name: string } | null } | null }
@@ -71,6 +72,7 @@ export default function ReviewQueue() {
         <Card className="p-6 text-center text-sm text-muted">Sign in with a real Coach/Admin account to review.</Card>
       ) : (
         <>
+          <CoachBoard />
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Review note (shared with participant)…"
             className="mb-4 h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
 
