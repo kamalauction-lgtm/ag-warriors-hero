@@ -31,7 +31,7 @@ function Donut({ data, size = 168 }: { data: { label: string; value: number }[];
         {data.map((d, i) => {
           const frac = d.value / total
           const el = (
-            <circle key={d.label} cx={cx} cy={cy} r={r} fill="none" stroke={PALETTE[i % PALETTE.length]}
+            <circle key={`${d.label}-${i}`} cx={cx} cy={cy} r={r} fill="none" stroke={PALETTE[i % PALETTE.length]}
               strokeWidth={18} strokeDasharray={`${frac * C} ${C}`}
               strokeDashoffset={-acc * C} transform={`rotate(-90 ${cx} ${cy})`}>
               <title>{d.label}: {d.value} ({Math.round(frac * 100)}%)</title>
@@ -45,7 +45,7 @@ function Donut({ data, size = 168 }: { data: { label: string; value: number }[];
       </svg>
       <ul className="min-w-[150px] flex-1 space-y-1.5">
         {data.map((d, i) => (
-          <li key={d.label} className="flex items-center gap-2 text-xs">
+          <li key={`${d.label}-${i}`} className="flex items-center gap-2 text-xs">
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
             <span className="flex-1 truncate text-muted">{d.label}</span>
             <b>{d.value}</b>
@@ -62,7 +62,7 @@ function Bars({ data, onPick }: { data: { label: string; value: number }[]; onPi
   return (
     <div className="space-y-1.5">
       {data.map((d, i) => (
-        <button key={d.label} type="button" onClick={() => onPick?.(d.label)}
+        <button key={`${d.label}-${i}`} type="button" onClick={() => onPick?.(d.label)}
           className={`flex w-full items-center gap-2 text-left text-xs ${onPick ? 'cursor-pointer' : 'cursor-default'}`}>
           <span className="w-32 shrink-0 truncate text-muted">{d.label}</span>
           <span className="h-4 flex-1 overflow-hidden rounded bg-surface2">
