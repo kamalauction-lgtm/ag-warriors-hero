@@ -20,6 +20,7 @@ export default function ReviewQueue() {
   const [ready, setReady] = useState<ReadyRow[]>([])
   const [subs, setSubs] = useState<SubRow[]>([])
   const [note, setNote] = useState('')
+  const [canReview, setCanReview] = useState<boolean | null>(null)
   const [toast, setToast] = useState('')
   const [closings, setClosings] = useState<CloseRow[]>([])
   const [pcj, setPcj] = useState<PcjRow[]>([])
@@ -32,6 +33,12 @@ export default function ReviewQueue() {
 
   const load = useCallback(async () => {
     if (!isReal || !supabase) return
+    // only reviewers see this page — the server enforces it too, this keeps the UI honest
+    const { data: mine } = await supabase.from('user_roles').select('role').eq('user_id', user!.id)
+    const ok = ((mine ?? []) as { role: string }[])
+      .some((r) => ['elite_coach', 'master_mentor', 'super_admin'].includes(r.role))
+    setCanReview(ok)
+    if (!ok) return
     const { data: r, error: e1 } = await supabase.from('readiness_submissions')
       .select('id,status,submitted_at,enrolments(participant_id,goal_30d,profiles!enrolments_participant_id_fkey(name))')
       .in('status', ['submitted', 'under_review']).order('submitted_at')
@@ -58,7 +65,7 @@ export default function ReviewQueue() {
       .map((e) => ({ participant_id: e.participant_id, name: e.profiles?.name ?? 'Warrior' })))
     const { data: cos } = await supabase.from('cohorts').select('id,name').in('status', ['open', 'active'])
     setNvCohorts((cos as { id: string; name: string }[]) ?? [])
-  }, [isReal])
+  }, [isReal, user])
   useEffect(() => { load() }, [load])
 
   const act = async (fn: string, args: object, ok: string) => {
@@ -82,6 +89,13 @@ export default function ReviewQueue() {
 
       {!isReal ? (
         <Card className="p-6 text-center text-sm text-muted">Sign in with a real Coach/Admin account to review.</Card>
+      ) : canReview === false ? (
+        <Card className="p-6 text-center">
+          <p className="text-sm font-bold">This page is for Coaches and Admins</p>
+          <p className="mx-auto mt-2 max-w-xs text-xs text-muted">
+            Your own challenge lives in <Link to="/challenge" className="font-bold text-accent">30 Days Closing Challenge</Link>.
+          </p>
+        </Card>
       ) : (
         <>
           <CoachBoard />
