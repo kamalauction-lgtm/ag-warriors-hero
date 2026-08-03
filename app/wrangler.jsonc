@@ -4,5 +4,12 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
+  },
+  // Staging: separate Worker, never mapped to hero.iqiaggroup.com.
+  // Deploy with `npm run deploy:staging` (builds in staging mode first).
+  "env": {
+    "staging": {
+      "name": "ag-warriors-hero-staging"
+    }
   }
 }
