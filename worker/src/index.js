@@ -150,13 +150,70 @@ async function ghlTag(env, contactId, label) {
   return res.ok
 }
 
+/* Stage moves happen for these labels only (spec §8). The tag always lands;
+   a stage move is best-effort and never blocks the writeback. */
+const STAGE_FOR_LABEL = {
+  'Booked': 'Appointment Booked',
+  'BOP Online': 'Online BOP',
+  'BOP Physical': 'Physical BOP',
+}
+
+let stageCache = null   // { 'lowercased stage name': { pipelineId, stageId } }
+
+/** Resolve stage names across every pipeline, case-insensitively. Cached per isolate. */
+async function loadStages(env) {
+  if (stageCache) return stageCache
+  if (!env.GHL_TOKEN || !env.GHL_LOCATION_ID) return (stageCache = {})
+  const res = await fetch(
+    `${env.GHL_API_BASE || 'https://services.leadconnectorhq.com'}/opportunities/pipelines?locationId=${env.GHL_LOCATION_ID}`,
+    { headers: { Authorization: `Bearer ${env.GHL_TOKEN}`, Version: env.GHL_API_VERSION || '2021-07-28' } },
+  )
+  if (!res.ok) return (stageCache = {})
+  const body = await res.json().catch(() => ({}))
+  const map = {}
+  for (const p of body.pipelines || []) {
+    for (const s of p.stages || []) {
+      const key = String(s.name || '').trim().toLowerCase()
+      if (key && !map[key]) map[key] = { pipelineId: p.id, stageId: s.id }
+    }
+  }
+  return (stageCache = map)
+}
+
+async function ghlMoveStage(env, opportunityId, label) {
+  const wanted = STAGE_FOR_LABEL[label]
+  if (!wanted || !opportunityId) return 'not-applicable'
+  const stages = await loadStages(env)
+  const hit = stages[wanted.toLowerCase()]
+  if (!hit) return 'stage-not-found'          // skip the move, keep the tag
+  const res = await fetch(
+    `${env.GHL_API_BASE || 'https://services.leadconnectorhq.com'}/opportunities/${opportunityId}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${env.GHL_TOKEN}`,
+        Version: env.GHL_API_VERSION || '2021-07-28',
+        ...JSON_HEADERS,
+      },
+      body: JSON.stringify({ pipelineId: hit.pipelineId, pipelineStageId: hit.stageId }),
+    },
+  )
+  return res.ok ? 'moved' : 'move-failed'
+}
+
 /** retry the writebacks the engine flagged; never blocks a disposition */
 async function reconcile(env, limit = 100) {
-  const pending = await rest(env, `/m4u_leads?select=id,ghl_contact_id,ghl_pending_label&ghl_sync_pending=is.true&ghl_contact_id=not.is.null&limit=${limit}`)
-  if (!pending.ok || !Array.isArray(pending.body)) return { synced: 0, failed: 0 }
-  let synced = 0, failed = 0
+  const pending = await rest(env, `/m4u_leads?select=id,ghl_contact_id,ghl_opportunity_id,ghl_pending_label&ghl_sync_pending=is.true&ghl_contact_id=not.is.null&limit=${limit}`)
+  if (!pending.ok || !Array.isArray(pending.body)) return { synced: 0, failed: 0, moved: 0 }
+  let synced = 0, failed = 0, moved = 0
   for (const lead of pending.body) {
-    const ok = await ghlTag(env, lead.ghl_contact_id, lead.ghl_pending_label || 'Updated')
+    const label = lead.ghl_pending_label || 'Updated'
+    const ok = await ghlTag(env, lead.ghl_contact_id, label)
+    // stage move is best-effort: a failure here must not hold back the tag
+    if (STAGE_FOR_LABEL[label]) {
+      const outcome = await ghlMoveStage(env, lead.ghl_opportunity_id, label)
+      if (outcome === 'moved') moved++
+    }
     if (ok) {
       await rest(env, `/m4u_leads?id=eq.${lead.id}`, {
         method: 'PATCH',
@@ -166,7 +223,7 @@ async function reconcile(env, limit = 100) {
       synced++
     } else failed++
   }
-  return { synced, failed }
+  return { synced, failed, moved }
 }
 
 async function sweep(env) {
