@@ -30,6 +30,8 @@ export default function Challenge() {
   const [xp, setXp] = useState(0)
   const [board, setBoard] = useState<{ name: string; pts: number }[]>([])
   const [reports, setReports] = useState<{ id: string; period: string; strengths: string; progress: string; barriers: string; agreed_actions: string; next_review: string | null; status: string }[]>([])
+  const [badges, setBadges] = useState<{ code: string; icon: string | null; name: Record<string, string> }[]>([])
+  const [streak, setStreak] = useState(0)
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   // forms
@@ -69,6 +71,12 @@ export default function Challenge() {
         agg[r.user_id] = { name: r.profiles?.name ?? 'Warrior', pts: (agg[r.user_id]?.pts ?? 0) + r.amount }
       })
       setBoard(Object.values(agg).sort((a, b) => b.pts - a.pts).slice(0, 10))
+      const { data: ub } = await supabase.from('user_badges')
+        .select('badge_code, ch_badges(code,icon,name)').eq('user_id', user!.id)
+      setBadges(((ub ?? []) as unknown as { ch_badges: { code: string; icon: string | null; name: Record<string, string> } | null }[])
+        .map((r) => r.ch_badges).filter((b): b is { code: string; icon: string | null; name: Record<string, string> } => !!b))
+      const { data: st } = await supabase.rpc('challenge_streak', { p_enrolment: e.id })
+      setStreak((st as number) ?? 0)
       const { data: cr } = await supabase.from('coaching_reports')
         .select('id,period,strengths,progress,barriers,agreed_actions,next_review,status')
         .eq('participant_id', user!.id).order('created_at', { ascending: false })
@@ -259,6 +267,25 @@ export default function Challenge() {
                 ))}
               </div>
             </>
+          )}
+          {badges.length > 0 && (
+            <>
+              <SectionTitle>🏅 My badges ({badges.length})</SectionTitle>
+              <Card className="mb-4 flex flex-wrap gap-2 p-3.5">
+                {badges.map((b) => (
+                  <span key={b.code} className="flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent-soft px-3 py-1.5 text-xs font-bold">
+                    <span className="text-base">{b.icon ?? '🏅'}</span> {jt(b.name, locale)}
+                  </span>
+                ))}
+              </Card>
+            </>
+          )}
+          {streak > 1 && (
+            <Card className="mb-4 flex items-center gap-3 p-3.5">
+              <Flame size={20} className="text-accent" />
+              <p className="flex-1 text-sm font-bold">{streak}-day verified streak</p>
+              {streak >= 7 && <Chip tone="success">🔥 on fire</Chip>}
+            </Card>
           )}
           <SectionTitle>Leaderboard — verified XP only</SectionTitle>
           <Card className="divide-y divide-border">

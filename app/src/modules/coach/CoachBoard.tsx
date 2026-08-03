@@ -8,7 +8,7 @@ import { supabase, supabaseReady } from '../../lib/supabase'
 import { Card, Chip, SectionTitle } from '../../components/ui'
 
 interface Row {
-  pid: string; name: string; country: string | null
+  pid: string; enrolId: string; name: string; country: string | null
   cohortId: string; cohortName: string; status: string; catchUp: boolean
   approved: number; lastSub: string | null; revisionPending: boolean; awaitingReview: boolean
   leadsActive: number; leadsWon: number; nextAppt: string | null
@@ -61,6 +61,7 @@ export default function CoachBoard() {
       const lastSub = allSubs.map((s) => s.submitted_at).sort().pop() ?? null
       return {
         pid: e.participant_id,
+        enrolId: e.id,
         name: e.profiles?.name ?? 'Warrior',
         country: e.profiles?.country ?? null,
         cohortId: e.cohort_id, cohortName: e.cohorts?.name ?? '—',
@@ -109,7 +110,7 @@ export default function CoachBoard() {
         </select>
         <select value={fStatus} onChange={(e) => setFStatus(e.target.value)} className={sel} aria-label="Status filter">
           <option value="all">Any status</option>
-          {['applied', 'ready_for_review', 'active', 'completed', 'withdrawn'].map((s) => <option key={s} value={s}>{s}</option>)}
+          {['invited', 'onboarding', 'ready', 'active', 'paused', 'completed', 'graduated', 'withdrawn'].map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
         <select value={fFlag} onChange={(e) => setFFlag(e.target.value)} className={sel} aria-label="Attention filter">
           <option value="all">Any activity</option>
@@ -139,6 +140,22 @@ export default function CoachBoard() {
               {r.closingStatus && <span>🏁 {r.closingStatus.replaceAll('_', ' ')}</span>}
               <span>{r.lastSub ? `last submission ${idle === 0 ? 'today' : `${idle}d ago`}` : 'no submissions yet'}</span>
             </div>
+            {r.approved >= 30 && r.status !== 'graduated' && (
+              <div className="mt-2 rounded-xl border border-success/40 bg-success/10 p-2.5">
+                <p className="mb-2 text-[11px] font-bold text-success">🎓 30 verified days — graduation is your decision (§6), never automatic</p>
+                <button type="button"
+                  onClick={async () => {
+                    if (!supabase) return
+                    const note = window.prompt('Graduation note (optional) — shown to the warrior:') ?? ''
+                    const { error } = await supabase.rpc('fn_graduate', { p_enrolment: r.enrolId, p_note: note || null })
+                    if (error) alert('⚠ ' + error.message)
+                    else load()
+                  }}
+                  className="h-10 w-full cursor-pointer rounded-xl bg-success text-xs font-extrabold text-white">
+                  🎓 Confirm graduation
+                </button>
+              </div>
+            )}
             {(inactive || r.revisionPending || r.awaitingReview || r.reportUnacked) && (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {inactive && <Chip tone="warning">⚠ inactive {idle}d</Chip>}
