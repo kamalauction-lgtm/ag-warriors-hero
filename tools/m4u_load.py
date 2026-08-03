@@ -8,6 +8,7 @@ The secret is read from the environment — never hardcode it.
 """
 import json
 import os
+import re
 import sys
 import urllib.request
 
@@ -36,10 +37,32 @@ def req(method, path, payload=None, prefer=None):
 
 
 def ts(v):
-    """MySQL datetime -> ISO8601 with the source timezone (Asia/Kuala_Lumpur = +08)."""
-    if not v or str(v).startswith("0000"):
+    """MySQL datetime -> ISO8601 with the source timezone (Asia/Kuala_Lumpur = +08).
+
+    The live data contains junk values ('0', '0000-00-00 …') — treat anything that
+    is not a full YYYY-MM-DD HH:MM:SS as missing rather than letting Postgres choke.
+    """
+    s = str(v or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", s) or s.startswith("0000"):
         return None
-    return str(v).replace(" ", "T") + "+08:00"
+    return s.replace(" ", "T") + "+08:00"
+
+
+def fetch_all(path_no_range, page=1000):
+    """PostgREST caps rows per response; page through with Range headers."""
+    out, start = [], 0
+    while True:
+        r = urllib.request.Request(f"{URL}{path_no_range}", method="GET")
+        r.add_header("apikey", SECRET)
+        r.add_header("Authorization", f"Bearer {SECRET}")
+        r.add_header("Range-Unit", "items")
+        r.add_header("Range", f"{start}-{start + page - 1}")
+        with urllib.request.urlopen(r) as resp:
+            batch = json.loads(resp.read().decode() or "[]")
+        out.extend(batch)
+        if len(batch) < page:
+            return out
+        start += page
 
 
 def jparse(v):
@@ -66,10 +89,10 @@ def push(table, rows, conflict):
         code, body = req("POST", f"/{table}?on_conflict={conflict}", chunk,
                          prefer="resolution=merge-duplicates,return=minimal")
         if code >= 300:
-            print(f"  ✗ {table} batch {i//BATCH+1}: HTTP {code} {body}")
+            print(f"  FAIL {table} batch {i//BATCH+1}: HTTP {code} {body}")
             return done
         done += len(chunk)
-        print(f"  … {table}: {done}/{len(rows)}")
+        print(f"  .. {table}: {done}/{len(rows)}")
     return done
 
 
@@ -102,7 +125,11 @@ def main():
                 "ghl_opportunity_id": r[C("leads", "ghl_opportunity_id")],
                 "property_id": pmap.get(int(pid)) if pid else None,
                 "phone": r[C("leads", "phone")],
-                "phone_norm": r[C("leads", "phone_norm")] or r[C("leads", "phone")],
+                # phone_norm is NOT NULL and uniquely indexed. A lead with no usable
+                # number still carries real history, so keep it with an obviously
+                # invalid, unique marker — the UI flags it for an admin to correct.
+                "phone_norm": (r[C("leads", "phone_norm")] or r[C("leads", "phone")]
+                               or f"invalid:{r[0]}"),
                 "name": r[C("leads", "name")],
                 "custom_fields": jparse(r[C("leads", "custom_fields")]),
                 "current_label": r[C("leads", "current_label")] or "New",
@@ -120,8 +147,9 @@ def main():
         push("m4u_leads", rows, "legacy_id")
 
     if phase in ("props", "all"):
-        code, leads = req("GET", "/m4u_leads?select=id,legacy_id&limit=10000")
+        leads = fetch_all("/m4u_leads?select=id,legacy_id&order=id")
         lmap = {l["legacy_id"]: l["id"] for l in leads if l.get("legacy_id") is not None}
+        print(f"lead map: {len(lmap)} entries")
         rows = []
         for r in d["lead_properties"]["rows"]:
             lid, pid = lmap.get(int(r[0])), pmap.get(int(r[1]))
