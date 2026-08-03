@@ -30,10 +30,10 @@ delete from coaching_reports     where participant_id = '1ed8053a-7bb5-4063-bf49
 -- enrolment cascades to readiness_submissions + task_submissions -> evidence_assets
 delete from enrolments where participant_id = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 
--- any uploaded evidence files for the test warrior
-delete from storage.objects
-where bucket_id = 'evidence'
-  and name like '1ed8053a-7bb5-4063-bf49-6b8d5b629403/%';
+-- NOTE: evidence FILES are not deleted here — Supabase blocks direct SQL deletes on
+-- storage tables. Verified 2026-08-03: the 'evidence' bucket is empty (our tests never
+-- attached a file), so there is nothing to remove. If files ever need purging, use
+-- Dashboard → Storage → evidence, or the Storage API.
 
 -- test notifications (both the warrior's and the ones our tests sent you)
 delete from notifications
