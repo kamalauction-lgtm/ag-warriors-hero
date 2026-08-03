@@ -27,6 +27,11 @@ export default function Shell({ children }: { children: ReactNode }) {
 
   return (
     <div className="mx-auto flex h-full max-w-lg flex-col md:max-w-5xl">
+      {import.meta.env.MODE === 'staging' && (
+        <div className="sticky top-0 z-[60] bg-warning py-1 text-center text-[11px] font-extrabold uppercase tracking-wider text-black">
+          ⚠ Staging — demo data · not the live app
+        </div>
+      )}
       <main className="flex-1 overflow-y-auto pb-24" key={location.pathname}>
         {children}
       </main>

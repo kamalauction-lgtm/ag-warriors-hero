@@ -1354,6 +1354,14 @@ export default function Admin() {
           {/* ============ 30-DAY CHALLENGE ============ */}
           {section === 'challenge' && (
             <>
+              <a href="#/coach"
+                className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border border-accent/50 bg-accent-soft p-3.5 no-underline">
+                <span className="text-xl">🛡</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-extrabold text-accent">Open Coach Review Queue →</p>
+                  <p className="text-[11px] text-muted">Approve readiness, evidence, closings and journey steps. Approvals live here, not in Command HQ.</p>
+                </div>
+              </a>
               <div className="mb-4 flex gap-1.5">
                 {(['progress', 'curriculum', 'coaches', 'reports'] as const).map((ct) => (
                   <button key={ct} type="button" onClick={() => setChTab(ct)}
