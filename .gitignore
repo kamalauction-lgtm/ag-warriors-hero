@@ -8,3 +8,4 @@ supabase/migrations/017_*_m4u_data_leads.sql
 supabase/migrations/018_m4u_data_lead_props.sql
 worker/.secrets.tmp
 worker/wh.tmp
+worker/.wrangler/
