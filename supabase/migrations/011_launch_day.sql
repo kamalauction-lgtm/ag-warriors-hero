@@ -14,14 +14,17 @@ begin;
 -- ---------- PART A: purge test data ----------
 -- Test Warrior: 1ed8053a-7bb5-4063-bf49-6b8d5b629403 (test.warrior@demo.my)
 
+-- ORDER MATTERS: pcj_progress.closing_id references ch_closings, and deleting
+-- leads cascades into closings — so the journey rows must go first.
+delete from pcj_progress         where participant_id = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
+
 -- CRM: deleting leads cascades to activities, appointments and closings
 delete from ch_leads where participant_id = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 
--- gamification + coaching + journey
+-- gamification + coaching
 delete from points_ledger        where user_id        = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 delete from mentor_points_ledger where user_id        = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 delete from user_badges          where user_id        = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
-delete from pcj_progress         where participant_id = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 delete from coaching_reports     where participant_id = '1ed8053a-7bb5-4063-bf49-6b8d5b629403';
 
 -- enrolment cascades to readiness_submissions + task_submissions -> evidence_assets

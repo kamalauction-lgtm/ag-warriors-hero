@@ -17,6 +17,12 @@
 -- Deleting the auth user cascades to the profile row.
 -- ============================================================
 
+-- invitations.accepted_by references this profile without cascade, so clear it first
+-- (safe to run even if 011 already removed the row)
+update invitations set accepted_by = null
+where accepted_by in (select id from profiles where email = 'siti2202@gmail.com');
+
+-- cascades: auth.users -> profiles -> user_roles
 delete from auth.users where email = 'siti2202@gmail.com';
 
 select 'remaining profiles' as check, name, email, country, is_commander
