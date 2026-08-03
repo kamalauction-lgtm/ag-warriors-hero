@@ -2,3 +2,7 @@ node_modules/
 dist/
 .env.local
 *.log
+
+# generated bulk data migrations (regenerate with tools/m4u_migrate.py)
+supabase/migrations/017_*_m4u_data_leads.sql
+supabase/migrations/018_m4u_data_lead_props.sql
