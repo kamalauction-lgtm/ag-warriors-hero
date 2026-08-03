@@ -18,7 +18,7 @@ interface Step {
 interface Prog { step_code: string; status: string; response: string | null; review_note: string | null }
 
 export default function Journey() {
-  const { user, locale } = useApp()
+  const { user, locale, t } = useApp()
   const isReal = supabaseReady && !!user && user.id.includes('-')
   const [steps, setSteps] = useState<Step[]>([])
   const [prog, setProg] = useState<Record<string, Prog>>({})
@@ -62,25 +62,25 @@ export default function Journey() {
       <header className="mb-4 flex items-center gap-3">
         <Link to="/challenge" aria-label="Back" className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink"><ArrowLeft size={16} /></Link>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-xl font-extrabold tracking-tight">Post-Closing Journey</h1>
-          <p className="text-xs text-muted">Closing → helping → leading. The Elite Coach path.</p>
+          <h1 className="font-display text-xl font-extrabold tracking-tight">{t('jr.title')}</h1>
+          <p className="text-xs text-muted">{t('jr.tagline')}</p>
         </div>
         <Chip tone="accent"><GraduationCap size={11} /> {mp} MP</Chip>
       </header>
 
       {!isReal ? (
-        <Card className="p-6 text-center text-sm text-muted">Sign in with a real account to walk the journey.</Card>
+        <Card className="p-6 text-center text-sm text-muted">{t('jr.signIn')}</Card>
       ) : (
         <>
           <Card className="mb-4 p-3.5 text-center">
             <p className="text-xs text-muted">
               {hasClosing
-                ? `Verified closing unlocked your journey · ${approved}/${steps.length} steps approved`
-                : 'Most steps unlock after your first verified closing — 🔓 steps are open now'}
+                ? `${t('jr.unlocked')} · ${approved}/${steps.length} ${t('jr.stepsApproved')}`
+                : t('jr.lockedNote')}
             </p>
           </Card>
 
-          <SectionTitle>The journey</SectionTitle>
+          <SectionTitle>{t('jr.theJourney')}</SectionTitle>
           {steps.map((s) => {
             const p = prog[s.code]
             const locked = !hasClosing && !s.open_without_closing
@@ -95,10 +95,10 @@ export default function Journey() {
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-bold">{jt(s.title, locale)}</p>
-                    {s.mentor_points > 0 && <p className="text-[10px] text-muted">+{s.mentor_points} Mentor Points on approval</p>}
+                    {s.mentor_points > 0 && <p className="text-[10px] text-muted">+{s.mentor_points} {t('jr.mpOnApproval')}</p>}
                   </div>
                   {p ? <Chip tone={tone}>{p.status.replaceAll('_', ' ')}</Chip>
-                    : locked ? <Chip tone="default">🔒</Chip> : <Chip tone="accent">open</Chip>}
+                    : locked ? <Chip tone="default">🔒</Chip> : <Chip tone="accent">{t('ch.open')}</Chip>}
                 </button>
 
                 {open === s.code && !locked && (
@@ -108,14 +108,14 @@ export default function Journey() {
                       <p className="mb-2 rounded-lg bg-warning/10 p-2 text-[11px] text-warning">🔄 Reviewer: {p.review_note}</p>
                     )}
                     {p?.status === 'approved' ? (
-                      <p className="rounded-lg bg-success/10 p-2 text-xs text-success">✅ Approved — {p.response}</p>
+                      <p className="rounded-lg bg-success/10 p-2 text-xs text-success">{t('jr.approved')} {p.response}</p>
                     ) : (
                       <>
-                        <textarea rows={3} value={resp} onChange={(e) => setResp(e.target.value)} placeholder="Your response…"
+                        <textarea rows={3} value={resp} onChange={(e) => setResp(e.target.value)} placeholder={t('jr.responsePh')}
                           className="mb-2 w-full rounded-xl border border-border bg-surface p-2.5 text-sm outline-none focus:border-accent" />
                         <button type="button" disabled={!resp} onClick={() => submit(s.code)}
                           className="h-11 w-full cursor-pointer rounded-xl bg-accent text-xs font-extrabold text-on-accent disabled:opacity-40">
-                          {p?.status === 'submitted' ? 'Resubmit for review' : 'Submit for human review'}
+                          {p?.status === 'submitted' ? t('jr.resubmit') : t('jr.submit')}
                         </button>
                       </>
                     )}
@@ -125,7 +125,7 @@ export default function Journey() {
             )
           })}
           <p className="mt-3 text-center text-[10px] text-muted">
-            Elite Coach eligibility is reviewed and decided by leadership (§19) — Mentor Points are indicators, never automatic appointment.
+            {t('jr.footer')}
           </p>
         </>
       )}

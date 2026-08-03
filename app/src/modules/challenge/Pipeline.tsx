@@ -29,7 +29,7 @@ interface Appt { id: string; kind: string; status: string; starts_at: string | n
 interface Closing { id: string; status: string; required_steps: string | null; missing_items: string | null; verified_at: string | null }
 
 export default function Pipeline() {
-  const { user } = useApp()
+  const { user, t } = useApp()
   const isReal = supabaseReady && !!user && user.id.includes('-')
   const [leads, setLeads] = useState<Lead[]>([])
   const [open, setOpen] = useState<string | null>(null)
@@ -137,24 +137,24 @@ export default function Pipeline() {
       <header className="mb-4 flex items-center gap-3">
         <Link to="/challenge" aria-label="Back" className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink"><ArrowLeft size={16} /></Link>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-xl font-extrabold tracking-tight">My Pipeline</h1>
-          <p className="text-xs text-muted">30DC CRM — private to you & your Coach</p>
+          <h1 className="font-display text-xl font-extrabold tracking-tight">{t('pl.title')}</h1>
+          <p className="text-xs text-muted">{t('pl.tagline')}</p>
         </div>
-        <Chip tone="accent">{active} active</Chip>
-        {won > 0 && <Chip tone="success"><Trophy size={11} /> {won} won</Chip>}
+        <Chip tone="accent">{active} {t('pl.active')}</Chip>
+        {won > 0 && <Chip tone="success"><Trophy size={11} /> {won} {t('pl.won')}</Chip>}
       </header>
 
       {!isReal ? (
-        <Card className="p-6 text-center text-sm text-muted">Sign in with a real account to use the live pipeline.</Card>
+        <Card className="p-6 text-center text-sm text-muted">{t('pl.signIn')}</Card>
       ) : (
         <>
           <button type="button" onClick={() => setShowAdd(!showAdd)}
             className="mb-3 flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent text-sm font-extrabold text-on-accent">
-            <Plus size={16} /> New lead
+            <Plus size={16} /> {t('pl.newLead')}
           </button>
           {showAdd && (
             <Card className="mb-4 p-4">
-              {([['name', 'Name / approved identifier *'], ['contact', 'Contact (phone / WhatsApp)'], ['interest', 'Project / interest']] as const).map(([k, ph]) => (
+              {([['name', t('pl.namePh')], ['contact', t('pl.contactPh')], ['interest', t('pl.interestPh')]] as const).map(([k, ph]) => (
                 <input key={k} value={nl[k]} placeholder={ph} onChange={(e) => setNl({ ...nl, [k]: e.target.value })}
                   className="mb-2 h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
               ))}
@@ -163,12 +163,12 @@ export default function Pipeline() {
                 {['Referral', 'Social media', 'Cold outreach', 'Event / booth', 'Personal network', 'Company lead', 'Other'].map((s) => <option key={s}>{s}</option>)}
               </select>
               <button type="button" disabled={!nl.name} onClick={addLead}
-                className="h-11 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">Save lead</button>
+                className="h-11 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">{t('pl.saveLead')}</button>
             </Card>
           )}
 
-          <SectionTitle>Leads ({leads.length})</SectionTitle>
-          {leads.length === 0 && <Card className="p-5 text-center text-xs text-muted">No leads yet — prospecting is Day 1 discipline. Add your first lead 💪</Card>}
+          <SectionTitle>{t('pl.leads')} ({leads.length})</SectionTitle>
+          {leads.length === 0 && <Card className="p-5 text-center text-xs text-muted">{t('pl.empty')}</Card>}
           {leads.map((l) => (
             <Card key={l.id} className="mb-2.5 p-3.5">
               <button type="button" onClick={() => setOpen(open === l.id ? null : l.id)} className="flex w-full cursor-pointer items-center gap-2 text-left">
@@ -186,28 +186,28 @@ export default function Pipeline() {
                       className="h-10 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent">
                       {STAGES.map((s) => <option key={s}>{s}</option>)}
                     </select>
-                    <input defaultValue={l.next_action ?? ''} placeholder="Next action" onBlur={(e) => e.target.value !== (l.next_action ?? '') && patchLead(l.id, { next_action: e.target.value })}
+                    <input defaultValue={l.next_action ?? ''} placeholder={t('pl.nextAction')} onBlur={(e) => e.target.value !== (l.next_action ?? '') && patchLead(l.id, { next_action: e.target.value })}
                       className="h-10 rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent" />
                   </div>
 
                   {/* activity log */}
-                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><Phone size={10} className="mr-1 inline" />LOG ACTIVITY</p>
+                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><Phone size={10} className="mr-1 inline" />{t('pl.logActivity')}</p>
                   <div className="mb-2 flex gap-2">
                     <select value={na.type} onChange={(e) => setNa({ ...na, type: e.target.value })}
                       className="h-10 w-32 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent">
                       {ACTIVITIES.map((a) => <option key={a} value={a}>{a.replaceAll('_', ' ')}</option>)}
                     </select>
-                    <input value={na.outcome} placeholder="Outcome…" onChange={(e) => setNa({ ...na, outcome: e.target.value })}
+                    <input value={na.outcome} placeholder={t('pl.outcomePh')} onChange={(e) => setNa({ ...na, outcome: e.target.value })}
                       className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent" />
                     <button type="button" disabled={!na.outcome} onClick={() => logActivity(l)}
-                      className="h-10 cursor-pointer rounded-xl bg-accent px-3 text-xs font-extrabold text-on-accent disabled:opacity-40">Log</button>
+                      className="h-10 cursor-pointer rounded-xl bg-accent px-3 text-xs font-extrabold text-on-accent disabled:opacity-40">{t('pl.log')}</button>
                   </div>
                   {acts.map((a) => (
                     <p key={a.id} className="text-[11px] text-muted">· {a.activity_type.replaceAll('_', ' ')} — {a.outcome} <span className="opacity-60">({new Date(a.happened_at).toLocaleDateString()})</span></p>
                   ))}
 
                   {/* appointments */}
-                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><CalendarDays size={10} className="mr-1 inline" />APPOINTMENTS & VIEWINGS</p>
+                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><CalendarDays size={10} className="mr-1 inline" />{t('pl.appointments')}</p>
                   <div className="mb-2 flex gap-2">
                     <select value={nap.kind} onChange={(e) => setNap({ ...nap, kind: e.target.value })}
                       className="h-10 w-28 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent">
@@ -216,7 +216,7 @@ export default function Pipeline() {
                     <input type="datetime-local" value={nap.when} onChange={(e) => setNap({ ...nap, when: e.target.value })} aria-label="When"
                       className="h-10 min-w-0 flex-1 rounded-xl border border-border bg-surface px-2 text-xs outline-none focus:border-accent" />
                     <button type="button" disabled={!nap.when} onClick={() => addAppt(l)}
-                      className="h-10 cursor-pointer rounded-xl bg-accent px-3 text-xs font-extrabold text-on-accent disabled:opacity-40">Set</button>
+                      className="h-10 cursor-pointer rounded-xl bg-accent px-3 text-xs font-extrabold text-on-accent disabled:opacity-40">{t('pl.set')}</button>
                   </div>
                   {appts.map((p) => (
                     <div key={p.id} className="mb-1 flex items-center gap-2 text-[11px] text-muted">
@@ -229,18 +229,18 @@ export default function Pipeline() {
                   ))}
 
                   {/* closing record */}
-                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><Flag size={10} className="mr-1 inline" />CLOSING RECORD</p>
+                  <p className="mb-1 mt-3 text-[11px] font-bold text-muted"><Flag size={10} className="mr-1 inline" />{t('pl.closingRecord')}</p>
                   {!closing ? (
                     <button type="button" onClick={() => startClosing(l)}
-                      className="h-10 w-full cursor-pointer rounded-xl border border-accent/60 text-xs font-extrabold text-accent">🏁 Start closing record</button>
+                      className="h-10 w-full cursor-pointer rounded-xl border border-accent/60 text-xs font-extrabold text-accent">{t('pl.startClosing')}</button>
                   ) : closing.status === 'COMPLETED' ? (
                     <Card className="border-success/40 bg-success/10 p-3 text-center">
-                      <p className="text-sm font-extrabold text-success">🏆 CLOSING VERIFIED</p>
-                      <p className="text-[11px] text-muted">Human-verified {closing.verified_at ? new Date(closing.verified_at).toLocaleDateString() : ''}</p>
+                      <p className="text-sm font-extrabold text-success">{t('pl.verified')}</p>
+                      <p className="text-[11px] text-muted">{t('pl.verifiedOn')} {closing.verified_at ? new Date(closing.verified_at).toLocaleDateString() : ''}</p>
                     </Card>
                   ) : closing.status === 'INTERNAL_REVIEW' ? (
                     <Card className="border-warning/40 p-3 text-center">
-                      <p className="text-xs font-bold text-warning">⏳ Awaiting human verification</p>
+                      <p className="text-xs font-bold text-warning">{t('pl.awaiting')}</p>
                     </Card>
                   ) : (
                     <div>
@@ -251,14 +251,14 @@ export default function Pipeline() {
                         </select>
                       </div>
                       {closing.missing_items && <p className="mb-2 rounded-lg bg-warning/10 p-2 text-[11px] text-warning">🔄 Reviewer: {closing.missing_items}</p>}
-                      <textarea rows={2} defaultValue={closing.required_steps ?? ''} placeholder="Required steps / documents status…"
+                      <textarea rows={2} defaultValue={closing.required_steps ?? ''} placeholder={t('pl.stepsPh')}
                         onBlur={(e) => e.target.value !== (closing.required_steps ?? '') && patchClosing({ required_steps: e.target.value })}
                         className="mb-2 w-full rounded-xl border border-border bg-surface p-2 text-xs outline-none focus:border-accent" />
                       <button type="button" onClick={submitClosing}
                         className="h-11 w-full cursor-pointer rounded-xl bg-accent text-xs font-extrabold text-on-accent">
-                        Submit for human verification
+                        {t('pl.submitVerification')}
                       </button>
-                      <p className="mt-1 text-center text-[10px] text-muted">A closing only counts after a human reviewer verifies it (§15)</p>
+                      <p className="mt-1 text-center text-[10px] text-muted">{t('pl.humanNote')}</p>
                     </div>
                   )}
                 </div>
