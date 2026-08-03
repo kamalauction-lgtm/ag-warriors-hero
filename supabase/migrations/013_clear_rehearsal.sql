@@ -18,8 +18,9 @@ where to_agent = '1ed8053a-7bb5-4063-bf49-6b8d5b629403'
 commit;
 
 -- verification: enrolments must be 0, profiles must be 2
-select 'enrolments (must be 0)' as check, count(*) from enrolments
+-- (cast every branch to text — a UNION cannot mix bigint and text)
+select 'enrolments (must be 0)' as check, count(*)::text as value from enrolments
 union all
-select 'profiles (must be 2)', count(*) from profiles
+select 'profiles (must be 2)', count(*)::text from profiles
 union all
-select 'cohort start date', official_start_date::text from cohorts where country = 'MY';
+select 'MY cohort start date', official_start_date::text from cohorts where country = 'MY';
