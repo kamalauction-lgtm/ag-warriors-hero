@@ -22,7 +22,7 @@ import {
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { supabaseReady } from '../lib/supabase'
-import ComingSoon from '../components/ComingSoon'
+import Caller from '../modules/caller/Caller'
 import { Avatar, Card, Chip, SectionTitle } from '../components/ui'
 
 /* ---------------- types & mock data (shapes = production DB) ---------------- */
@@ -192,15 +192,9 @@ export default function Leads() {
   }, [autoNext, held, queue, grants])
 
   if (!user) return null
-  // The Marketing4U call engine is specified (docs/SPEC-CALLER-M4U.md) but not yet
-  // wired to the database — real accounts must never see sample leads.
-  if (isReal) return (
-    <ComingSoon
-      title={t('leads.title')}
-      what="The Marketing4U call engine — lead queue, dispositions, callbacks and BOP booking — is being built next. It will replace the current caller with your real leads."
-      when="Planned after Cohort 1 launches."
-    />
-  )
+  // Real accounts get the live Marketing4U caller (engine in Postgres, one lead at
+  // a time). Demo personas keep the mock walkthrough below.
+  if (isReal) return <Caller />
   const say = (m: string) => {
     setToast(m)
     setTimeout(() => setToast(''), 3200)
