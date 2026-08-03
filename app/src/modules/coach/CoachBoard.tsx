@@ -128,7 +128,7 @@ export default function CoachBoard() {
           <Card key={r.pid} className={clsx('mb-2.5 p-3.5', inactive && 'border-warning/50')}>
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
               <p className="text-sm font-bold">{r.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.name}</p>
-              <Chip tone="muted">{r.cohortName}</Chip>
+              <Chip tone="default">{r.cohortName}</Chip>
               <Chip tone={r.status === 'active' ? 'success' : r.status === 'withdrawn' ? 'danger' : 'warning'}>{r.status}</Chip>
               {r.catchUp && <Chip tone="warning">catch-up</Chip>}
             </div>
@@ -144,7 +144,7 @@ export default function CoachBoard() {
                 {inactive && <Chip tone="warning">⚠ inactive {idle}d</Chip>}
                 {r.awaitingReview && <Chip tone="accent">📨 awaiting review</Chip>}
                 {r.revisionPending && <Chip tone="warning">🔄 revision pending</Chip>}
-                {r.reportUnacked && <Chip tone="muted">🧭 report not acknowledged</Chip>}
+                {r.reportUnacked && <Chip tone="default">🧭 report not acknowledged</Chip>}
               </div>
             )}
           </Card>

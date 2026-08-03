@@ -1,6 +1,6 @@
 /* In-app notifications (§25) — live DB; mark-read; tap to follow link. */
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { ArrowLeft, BellRing, Check } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
@@ -11,7 +11,6 @@ interface Notif { id: number; type: string; title: string; body: string; link: s
 
 export default function Notifications() {
   const { user } = useApp()
-  const nav = useNavigate()
   const isReal = supabaseReady && !!user && user.id.includes('-')
   const [rows, setRows] = useState<Notif[]>([])
 

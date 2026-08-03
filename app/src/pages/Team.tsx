@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { compactMoney } from '../lib/format'
 import { getLeaders } from '../lib/mockData'
-import { Avatar, Card, Chip, SectionTitle } from '../components/ui'
+import { Avatar, Card, SectionTitle } from '../components/ui'
 
 const COLORS = ['#e0a52f', '#8b5cf6', '#10b981', '#3b82f6', '#f43f5e', '#14b8a6']
 

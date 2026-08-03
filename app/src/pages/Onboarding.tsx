@@ -20,7 +20,7 @@ import {
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { useBrand } from '../lib/brand'
-import { Bar, Card, Chip, ProgressRing } from '../components/ui'
+import { Card, Chip, ProgressRing } from '../components/ui'
 
 const LESSONS = [
   { id: 'l1', type: 'video', title: 'Welcome to AG Warriors', sub: 'Who we are · Become Better, Build Better, Give Better', min: 3 },

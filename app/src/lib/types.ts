@@ -2,7 +2,7 @@ export type Country = 'MY' | 'ID'
 export type Locale = 'en' | 'id' | 'bm'
 export type Theme = 'light' | 'dark'
 export type Role = 'agent' | 'leader' | 'country_admin' | 'master_admin'
-export type CareerRank = 'REN' | 'L' | 'TL' | 'HOT' | 'TM' | 'VP'
+export type CareerRank = 'REN' | 'L' | 'TL' | 'HOT' | 'TM' | 'VP' | 'GVP'
 export type DealStage =
   | 'calling'
   | 'follow_up'

@@ -18,7 +18,7 @@ const CLOSE_STATUS = ['NOT_STARTED', 'PREPARING', 'DOCUMENTATION', 'CUSTOMER_DEC
 
 const stageTone = (s: string) =>
   s === 'CLOSED_WON' ? 'success' : s === 'CLOSED_LOST' || s === 'DISQUALIFIED' ? 'danger'
-    : s === 'CLOSING_PROCESS' || s === 'NEGOTIATION' ? 'accent' : 'muted'
+    : s === 'CLOSING_PROCESS' || s === 'NEGOTIATION' ? 'accent' : 'default'
 
 interface Lead {
   id: string; name: string; contact: string | null; source: string | null; interest: string | null

@@ -24,7 +24,6 @@ import {
   Play,
   Download,
   Crown,
-  Coins,
   Handshake,
   Zap,
   Flame,

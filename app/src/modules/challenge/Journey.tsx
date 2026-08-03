@@ -85,7 +85,7 @@ export default function Journey() {
             const p = prog[s.code]
             const locked = !hasClosing && !s.open_without_closing
             const tone = p?.status === 'approved' ? 'success' : p?.status === 'submitted' ? 'warning'
-              : p?.status === 'revision_required' ? 'danger' : 'muted'
+              : p?.status === 'revision_required' ? 'danger' : 'default'
             return (
               <Card key={s.code} className="mb-2.5 p-3.5">
                 <button type="button" disabled={locked} onClick={() => { setOpen(open === s.code ? null : s.code); setResp(p?.response ?? '') }}
@@ -98,7 +98,7 @@ export default function Journey() {
                     {s.mentor_points > 0 && <p className="text-[10px] text-muted">+{s.mentor_points} Mentor Points on approval</p>}
                   </div>
                   {p ? <Chip tone={tone}>{p.status.replaceAll('_', ' ')}</Chip>
-                    : locked ? <Chip tone="muted">🔒</Chip> : <Chip tone="accent">open</Chip>}
+                    : locked ? <Chip tone="default">🔒</Chip> : <Chip tone="accent">open</Chip>}
                 </button>
 
                 {open === s.code && !locked && (

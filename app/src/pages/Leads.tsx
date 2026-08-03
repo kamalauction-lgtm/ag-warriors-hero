@@ -412,6 +412,7 @@ export default function Leads() {
                   </a>
                 </div>
 
+
                 {/* history */}
                 {held.history.length > 0 && (
                   <div className="mb-3">
@@ -448,7 +449,7 @@ export default function Leads() {
                 </div>
 
                 {/* BOP session picker */}
-                {activeRule && 'bop' in activeRule && activeRule.bop && (
+                {activeRule && 'bop' in activeRule && typeof activeRule.bop === 'string' && (
                   <select value={bopId} onChange={(e) => setBopId(e.target.value)} className="mb-2 h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" aria-label="BOP session">
                     <option value="">Pick a {activeRule.bop} BOP session…</option>
                     {BOP_SESSIONS.filter((s) => s.type === activeRule.bop).map((s) => (
