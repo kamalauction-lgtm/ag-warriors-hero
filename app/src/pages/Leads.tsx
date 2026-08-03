@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
+import { supabaseReady } from '../lib/supabase'
+import ComingSoon from '../components/ComingSoon'
 import { Avatar, Card, Chip, SectionTitle } from '../components/ui'
 
 /* ---------------- types & mock data (shapes = production DB) ---------------- */
@@ -130,6 +132,7 @@ type Tab = 'home' | 'followups' | 'booked' | 'projects' | 'messages'
 
 export default function Leads() {
   const { user, t } = useApp()
+  const isReal = supabaseReady && !!user && user.id.includes('-')
   const [tab, setTab] = useState<Tab>('home')
   const [queue, setQueue] = useState<M4ULead[]>(SEED_QUEUE)
   const [held, setHeld] = useState<M4ULead | null>(null)
@@ -189,6 +192,15 @@ export default function Leads() {
   }, [autoNext, held, queue, grants])
 
   if (!user) return null
+  // The Marketing4U call engine is specified (docs/SPEC-CALLER-M4U.md) but not yet
+  // wired to the database — real accounts must never see sample leads.
+  if (isReal) return (
+    <ComingSoon
+      title={t('leads.title')}
+      what="The Marketing4U call engine — lead queue, dispositions, callbacks and BOP booking — is being built next. It will replace the current caller with your real leads."
+      when="Planned after Cohort 1 launches."
+    />
+  )
   const say = (m: string) => {
     setToast(m)
     setTimeout(() => setToast(''), 3200)

@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Bell, Flame, Moon, Sun, Trophy } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
+import { supabase, supabaseReady } from '../lib/supabase'
 import { useBrand } from '../lib/brand'
 import './elite.css'
 import { COUNTRY_CFG, compactMoney } from '../lib/format'
@@ -17,10 +18,40 @@ const LOCALES: { v: Locale; label: string }[] = [
   { v: 'id', label: 'ID' },
 ]
 
+interface Live { enrolled: boolean; status: string; day: number; approved: number; xp: number; streak: number }
+
 export default function MyDay() {
   const { user, t, theme, toggleTheme, locale, setLocale } = useApp()
   const mascot = useBrand(user?.country ?? 'MY', 'mascot_home')
   const [toast, setToast] = useState('')
+  const [live, setLive] = useState<Live | null>(null)
+  // real account = live data only; demo personas keep the showcase numbers
+  const isReal = supabaseReady && !!user && user.id.includes('-')
+
+  const loadLive = useCallback(async () => {
+    if (!isReal || !supabase || !user) return
+    const { data: es } = await supabase.from('enrolments').select('id,status,cohort_id')
+      .eq('participant_id', user.id).limit(1)
+    const e = es?.[0] as { id: string; status: string; cohort_id: string } | undefined
+    if (!e) { setLive({ enrolled: false, status: '', day: 0, approved: 0, xp: 0, streak: 0 }); return }
+    const [dayR, subs, pl, st] = await Promise.all([
+      supabase.rpc('cohort_day', { p_cohort: e.cohort_id }),
+      supabase.from('task_submissions').select('day_no,status').eq('enrolment_id', e.id),
+      supabase.from('points_ledger').select('amount').eq('user_id', user.id).eq('status', 'verified'),
+      supabase.rpc('challenge_streak', { p_enrolment: e.id }),
+    ])
+    const days = new Set(((subs.data ?? []) as { day_no: number; status: string }[])
+      .filter((s) => s.status === 'approved').map((s) => s.day_no))
+    setLive({
+      enrolled: true, status: e.status,
+      day: (dayR.data as number) ?? 0,
+      approved: days.size,
+      xp: ((pl.data ?? []) as { amount: number }[]).reduce((tot, r) => tot + r.amount, 0),
+      streak: (st.data as number) ?? 0,
+    })
+  }, [isReal, user])
+  useEffect(() => { loadLive() }, [loadLive])
+
   if (!user) return null
 
   const say = (m: string) => {
@@ -116,7 +147,57 @@ export default function MyDay() {
         </Link>
       )}
 
+      {/* ---- REAL ACCOUNT: live challenge hero (no mock numbers) ---- */}
+      {isReal && (
+        <div className="hero-user mb-4 p-4">
+          {mascot && <img src={mascot} alt="" className="hero-mascot" />}
+          <div className="relative flex items-center gap-4">
+            <ProgressRing pct={live ? (live.approved / 30) * 100 : 0} size={76} label="30DC" />
+            <div className="grid flex-1 grid-cols-2 gap-x-2 gap-y-3 pr-20">
+              <div>
+                <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">
+                  <Flame size={11} className="text-warning" /> Streak
+                </p>
+                <p className="font-display text-lg font-extrabold">
+                  {live?.streak ?? 0} <span className="text-[10px] font-semibold text-[#c9c2a8]">{t('common.streak')}</span>
+                </p>
+              </div>
+              <div>
+                <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">
+                  <Trophy size={11} className="text-accent" /> Verified XP
+                </p>
+                <p className="gold-text font-display text-lg font-extrabold">{live?.xp ?? 0}</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">30 Days Closing Challenge</p>
+                <p className="gold-text font-display text-2xl font-extrabold">
+                  {!live?.enrolled ? 'Not enrolled'
+                    : live.status !== 'active' ? 'Awaiting approval'
+                    : live.day === 0 ? 'Starts 8 Aug'
+                    : `Day ${live.day} of 30`}
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="relative mt-3 border-t border-white/10 pt-3">
+            <Link to="/challenge"
+              className="flex h-11 w-full cursor-pointer items-center justify-center rounded-xl bg-accent text-sm font-extrabold text-on-accent no-underline">
+              {!live?.enrolled ? 'Join the Challenge →'
+                : live.status !== 'active' ? 'View my enrolment →'
+                : live.day === 0 ? 'View the roadmap →'
+                : `Continue Day ${live.day} →`}
+            </Link>
+            {live?.enrolled && live.status === 'active' && (
+              <p className="mt-2 text-center text-[11px] text-[#c9c2a8]">
+                {live.approved} of 30 days verified by your Coach
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Hero stats — brand moment (mascot = uploadable Brand Studio slot) */}
+      {!isReal && (
       <div className="hero-user mb-4 p-4">
         {mascot && <img src={mascot} alt="" className="hero-mascot" />}
         <div className="relative flex items-center gap-4">
@@ -151,18 +232,21 @@ export default function MyDay() {
           <Chip tone="success">{closings.length} {t('common.closings')} {t('common.week')}</Chip>
         </div>
       </div>
+      )}
 
       {/* Time-Boxing — full M5: statuses, reasons, postpone, calendar, reminders */}
       <TimeBox onToast={say} />
 
-      {/* Reward teaser */}
-      <Card className="mb-2 p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <p className="text-sm font-semibold">🎯 {t('common.target')}: Dubai Elite Trip</p>
-          <span className="font-display text-sm font-extrabold text-accent">68%</span>
-        </div>
-        <Bar pct={68} />
-      </Card>
+      {/* Reward teaser — sample data, demo personas only */}
+      {!isReal && (
+        <Card className="mb-2 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold">🎯 {t('common.target')}: Dubai Elite Trip</p>
+            <span className="font-display text-sm font-extrabold text-accent">68%</span>
+          </div>
+          <Bar pct={68} />
+        </Card>
+      )}
 
       {toast && (
         <div className="fixed bottom-24 left-1/2 z-[200] w-[92%] max-w-sm -translate-x-1/2 rounded-xl bg-accent px-4 py-2.5 text-center text-xs font-bold text-on-accent shadow-lg">

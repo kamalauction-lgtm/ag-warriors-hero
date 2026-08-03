@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Plus, Building2, ChevronRight, Calculator } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
+import { supabaseReady } from '../lib/supabase'
 import { compactMoney, money } from '../lib/format'
 import { STAGES, getDeals } from '../lib/mockData'
 import { Card, Chip, SectionTitle } from '../components/ui'
@@ -10,6 +11,7 @@ import type { DealStage } from '../lib/types'
 
 export default function Sales() {
   const { user, t } = useApp()
+  const isReal = supabaseReady && !!user && user.id.includes('-')
   const [active, setActive] = useState<DealStage | 'all'>('all')
   if (!user) return null
 
@@ -19,6 +21,44 @@ export default function Sales() {
     .filter((d) => d.stage === 'closed')
     .reduce((s, d) => s + d.commission, 0)
   const pipeline = deals.filter((d) => d.stage !== 'closed')
+
+  // Real accounts: the deal pipeline is not wired to the database yet, so we show
+  // nothing rather than sample deals. The Income Calculator below is fully working.
+  if (isReal) return (
+    <div className="animate-rise px-4 pt-5">
+      <header className="mb-4">
+        <h1 className="font-display text-xl font-extrabold tracking-tight">{t('sales.title')}</h1>
+        <p className="text-xs text-muted">IQI AG Hero</p>
+      </header>
+      <Link to="/sales/income" className="mb-3 block">
+        <Card className="flex items-center gap-3 p-4">
+          <Calculator size={20} className="text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold">Income Calculator</p>
+            <p className="text-[11px] text-muted">Primary + Subsale · full MY calculation — ready to use</p>
+          </div>
+          <ChevronRight size={16} className="text-muted" />
+        </Card>
+      </Link>
+      <Link to="/pipeline" className="mb-3 block">
+        <Card className="flex items-center gap-3 p-4">
+          <Building2 size={20} className="text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold">My Challenge Pipeline</p>
+            <p className="text-[11px] text-muted">Leads, appointments and human-verified closings</p>
+          </div>
+          <ChevronRight size={16} className="text-muted" />
+        </Card>
+      </Link>
+      <Card className="p-5 text-center">
+        <p className="text-sm font-bold">Full deal pipeline — coming soon</p>
+        <p className="mx-auto mt-2 max-w-xs text-xs text-muted">
+          Company-wide deals and commission tracking arrive after Cohort 1. Until then your
+          challenge pipeline above is the live one — and we only show real numbers.
+        </p>
+      </Card>
+    </div>
+  )
 
   return (
     <div className="animate-rise px-4 pt-5">

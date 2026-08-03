@@ -1,7 +1,9 @@
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronRight, Crown, ImagePlus, Medal, Swords } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
+import { supabase, supabaseReady } from '../lib/supabase'
 import { compactMoney } from '../lib/format'
 import { getLeaders } from '../lib/mockData'
 import { Avatar, Card, SectionTitle } from '../components/ui'
@@ -10,7 +12,61 @@ const COLORS = ['#e0a52f', '#8b5cf6', '#10b981', '#3b82f6', '#f43f5e', '#14b8a6'
 
 export default function Team() {
   const { user, t } = useApp()
+  const isReal = supabaseReady && !!user && user.id.includes('-')
+  const [board, setBoard] = useState<{ id: string; name: string; xp: number }[]>([])
+
+  const loadBoard = useCallback(async () => {
+    if (!isReal || !supabase) return
+    const { data } = await supabase.from('points_ledger')
+      .select('user_id, amount, profiles!points_ledger_user_id_fkey(name)').eq('status', 'verified')
+    const agg: Record<string, { id: string; name: string; xp: number }> = {}
+    ;((data ?? []) as unknown as { user_id: string; amount: number; profiles: { name: string } | null }[])
+      .forEach((r) => {
+        agg[r.user_id] = { id: r.user_id, name: r.profiles?.name ?? 'Warrior', xp: (agg[r.user_id]?.xp ?? 0) + r.amount }
+      })
+    setBoard(Object.values(agg).sort((a, b) => b.xp - a.xp))
+  }, [isReal])
+  useEffect(() => { loadBoard() }, [loadBoard])
+
   if (!user) return null
+
+  // Real accounts: leaderboard built from human-verified XP only.
+  if (isReal) return (
+    <div className="animate-rise px-4 pt-5">
+      <header className="mb-4">
+        <h1 className="font-display text-xl font-extrabold tracking-tight">{t('team.title')}</h1>
+        <p className="text-xs text-muted">Verified XP only · 30 Days Closing Challenge</p>
+      </header>
+      <Card className="mb-3 divide-y divide-border">
+        {board.length === 0 && (
+          <p className="p-5 text-center text-xs text-muted">
+            No verified XP yet. The board fills as Coaches approve real work 🔥
+          </p>
+        )}
+        {board.map((b, i) => (
+          <div key={b.id} className={clsx('flex items-center gap-3 p-3', b.id === user.id && 'bg-accent-soft')}>
+            <span className="w-6 text-center font-display font-extrabold">{['🥇', '🥈', '🥉'][i] ?? i + 1}</span>
+            <Avatar name={b.name} color={COLORS[i % COLORS.length]} size={32} />
+            <span className="flex-1 text-sm font-semibold">{b.name}{b.id === user.id ? ' (you)' : ''}</span>
+            <span className="font-display text-sm font-extrabold text-accent">{b.xp} XP</span>
+          </div>
+        ))}
+      </Card>
+      <Link to="/team/career" className="block">
+        <Card className="flex items-center gap-3 p-4">
+          <Medal size={18} className="text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold">Career Path</p>
+            <p className="text-[11px] text-muted">REN → GVP ladder · your progress to the next rank</p>
+          </div>
+          <ChevronRight size={16} className="text-muted" />
+        </Card>
+      </Link>
+      <p className="mt-3 text-center text-[11px] text-muted">
+        Team pods, Tim Elit and full team analytics arrive after Cohort 1.
+      </p>
+    </div>
+  )
   const rows = [...getLeaders(user.country)].sort((a, b) => b.points - a.points)
   const podium = rows.slice(0, 3)
   const rest = rows.slice(3)
