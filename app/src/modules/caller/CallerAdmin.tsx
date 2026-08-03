@@ -5,8 +5,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { displayPhone, phoneProblem } from '../../lib/phone'
 import { Card, Chip } from '../../components/ui'
+import CallerSetup, { type SetupTab } from './CallerSetup'
 
-type Tab = 'overview' | 'leads' | 'reports' | 'audit'
+type Tab = 'overview' | 'leads' | 'reports' | 'audit' | SetupTab
+const SETUP_TABS: SetupTab[] = ['projects', 'pipelines', 'fields', 'quotes', 'bop']
 
 interface Attempt { agent_id: string; disposition: string; called_at: string; note: string | null; lead_id: number }
 interface LeadRow { id: number; name: string | null; phone_norm: string | null; current_label: string; status: string; attempt_count: number; property_id: number | null; updated_at: string }
@@ -83,6 +85,8 @@ export default function CallerAdmin() {
   const [q, setQ] = useState('')
   const [statusF, setStatusF] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [toast, setToastRaw] = useState('')
+  const setToast = (m: string) => { setToastRaw(m); setTimeout(() => setToastRaw(''), 3500) }
 
   const load = useCallback(async () => {
     if (!supabase) return
@@ -157,11 +161,11 @@ export default function CallerAdmin() {
   return (
     <>
       <div className="no-scrollbar mb-4 flex gap-1.5 overflow-x-auto">
-        {(['overview', 'leads', 'reports', 'audit'] as Tab[]).map((t) => (
+        {(['overview', 'leads', 'reports', 'audit', ...SETUP_TABS] as Tab[]).map((t) => (
           <button key={t} type="button" onClick={() => { setTab(t); setDrill(null) }}
             className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-2 text-xs font-bold capitalize ${
               tab === t ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-ink'}`}>
-            {t}
+            {t === 'bop' ? 'BOP' : t}
           </button>
         ))}
         <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Range"
@@ -292,6 +296,16 @@ export default function CallerAdmin() {
           })}
           {shownLeads.length === 0 && <Card className="p-5 text-center text-xs text-muted">No leads match.</Card>}
         </>
+      )}
+
+      {!loading && (SETUP_TABS as string[]).includes(tab) && (
+        <CallerSetup tab={tab as SetupTab} onToast={setToast} />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 z-[200] w-[92%] max-w-sm -translate-x-1/2 rounded-xl bg-accent px-4 py-2.5 text-center text-xs font-bold text-on-accent shadow-lg">
+          {toast}
+        </div>
       )}
     </>
   )
