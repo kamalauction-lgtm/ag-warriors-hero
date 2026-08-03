@@ -1,0 +1,17 @@
+{
+  "name": "m4u-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-03",
+  // Secrets (set with `npx wrangler secret put NAME`, never committed):
+  //   SUPABASE_SERVICE_KEY · WEBHOOK_SECRET · GHL_TOKEN
+  "vars": {
+    "SUPABASE_URL": "https://zlbyfgfublqlrsqohvsn.supabase.co",
+    "GHL_API_BASE": "https://services.leadconnectorhq.com",
+    "GHL_API_VERSION": "2021-07-28",
+    "DEFAULT_COUNTRY": "MY"
+  },
+  // expiry sweep + GHL writeback retry, every 5 minutes (spec §6)
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
+}
