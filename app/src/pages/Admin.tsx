@@ -41,6 +41,7 @@ import { getIncomeCfg, setIncomeCfg, useIncomeCfg } from '../lib/income'
 import { supabase, supabaseReady } from '../lib/supabase'
 import ChallengeReports from '../modules/challenge/Reports'
 import Coaches from '../modules/challenge/Coaches'
+import CallerAdmin from '../modules/caller/CallerAdmin'
 import { useEffect } from 'react'
 import './admin.css'
 
@@ -1062,7 +1063,8 @@ export default function Admin() {
           )}
 
           {/* ============ CALLER · M4U (one function, own sub-tabs) ============ */}
-          {section === 'caller' && (
+          {section === 'caller' && supabaseReady && user.id.includes('-') && <CallerAdmin />}
+          {section === 'caller' && !(supabaseReady && user.id.includes('-')) && (
             <>
               <div className="no-scrollbar mb-5 flex gap-1.5 overflow-x-auto">
                 {(['overview', 'leads', 'pipelines', 'projects', 'fields', 'import', 'quotes', 'bop', 'reports', 'audit'] as CallerTab[]).map((ct) => (
