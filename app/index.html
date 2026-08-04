@@ -12,6 +12,21 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;450;500;600;700&family=Anton&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous" />
     <title>IQI AG Warriors</title>
+    <script>
+      /* Clean URLs without changing the router.
+         The app uses HashRouter (a fix for deep links 404ing on Workers early on),
+         so /testme would load the shell but not route. The Worker's SPA fallback
+         already serves index.html for any path, so we translate the path into a
+         hash route before React boots. Result: hero.iqiaggroup.com/testme works,
+         and is what we print on QR codes. */
+      (function () {
+        var p = window.location.pathname;
+        if (p && p !== '/' && !p.startsWith('/assets/') && !/\.[a-z0-9]+$/i.test(p)) {
+          var target = '/#' + p + window.location.search + window.location.hash.replace('#', '');
+          window.location.replace(target);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
