@@ -129,4 +129,12 @@ w("select 'questions', count(*)::text from talent_questions union all")
 w("select 'options', count(*)::text from talent_options union all")
 w("select 'events', count(*)::text from talent_events;")
 
-print("\n".join(out))
+# Write the file ourselves with an explicit encoding. Redirecting stdout on
+# Windows uses the console codepage (cp1252), which silently turns curly quotes
+# and em-dashes into bytes Postgres cannot decode — that broke the string mid
+# sentence and surfaced as: relation "an" does not exist.
+DEST = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                    "..", "supabase", "migrations", "027_talent_seed.sql")
+with open(DEST, "w", encoding="utf-8", newline="\n") as fh:
+    fh.write("\n".join(out) + "\n")
+print(f"wrote {os.path.abspath(DEST)}  ({len(out)} statements)")

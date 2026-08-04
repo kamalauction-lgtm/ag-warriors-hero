@@ -8,9 +8,9 @@ from talent_seed import T
 R = "role."
 
 SCEN = [
- ("E1", T("You receive a new lead from an online advertisement. The person replies only: “Send price.” What would you naturally do next?",
-          "Anda menerima lead baharu daripada iklan dalam talian. Orang itu hanya membalas: “Hantar harga.” Apakah yang anda akan buat seterusnya?",
-          "Anda menerima lead baru dari iklan online. Orang tersebut hanya membalas: “Kirim harga.” Apa yang secara alami Anda lakukan berikutnya?"), [
+ ("E1", T("You receive a new lead from an online advertisement. The person replies only: \"Send price.\" What would you naturally do next?",
+          "Anda menerima lead baharu daripada iklan dalam talian. Orang itu hanya membalas: \"Hantar harga.\" Apakah yang anda akan buat seterusnya?",
+          "Anda menerima lead baru dari iklan online. Orang tersebut hanya membalas: \"Kirim harga.\" Apa yang secara alami Anda lakukan berikutnya?"), [
   (1, T("Ask two or three simple questions to understand their needs before recommending anything.",
         "Tanya dua tiga soalan mudah untuk memahami keperluan mereka sebelum mengesyorkan apa-apa.",
         "Ajukan dua tiga pertanyaan sederhana untuk memahami kebutuhan mereka sebelum merekomendasikan apa pun."), {R + "relationship_builder": 3}),
@@ -24,9 +24,9 @@ SCEN = [
         "Cipta video pendek atau visual yang menjawab soalan biasa pembeli.",
         "Buat video pendek atau visual yang menjawab pertanyaan yang biasa ditanyakan pembeli."), {R + "content_creator": 3})]),
 
- ("E2", T("A buyer likes the project but says, “The price is too high.” What would you naturally do first?",
-          "Pembeli suka projek itu tetapi berkata, “Harganya terlalu tinggi.” Apakah yang anda akan buat dahulu?",
-          "Pembeli menyukai proyeknya tetapi berkata, “Harganya terlalu tinggi.” Apa yang pertama Anda lakukan?"), [
+ ("E2", T("A buyer likes the project but says, \"The price is too high.\" What would you naturally do first?",
+          "Pembeli suka projek itu tetapi berkata, \"Harganya terlalu tinggi.\" Apakah yang anda akan buat dahulu?",
+          "Pembeli menyukai proyeknya tetapi berkata, \"Harganya terlalu tinggi.\" Apa yang pertama Anda lakukan?"), [
   (1, T("Ask what they are comparing it with and understand their real concern.",
         "Tanya mereka membandingkan dengan apa dan fahami kebimbangan sebenar.",
         "Tanyakan mereka membandingkan dengan apa dan pahami kekhawatiran sebenarnya."), {R + "relationship_builder": 3}),
