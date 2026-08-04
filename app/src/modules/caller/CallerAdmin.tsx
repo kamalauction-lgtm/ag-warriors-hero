@@ -9,7 +9,7 @@ import CallerSetup, { type SetupTab } from './CallerSetup'
 import CallerImport from './CallerImport'
 
 type Tab = 'overview' | 'leads' | 'reports' | 'audit' | 'import' | SetupTab
-const SETUP_TABS: SetupTab[] = ['projects', 'pipelines', 'fields', 'quotes', 'bop']
+const SETUP_TABS: SetupTab[] = ['agents', 'projects', 'pipelines', 'fields', 'quotes', 'bop']
 const ALL_EXTRA = [...SETUP_TABS, 'import'] as const
 
 interface Attempt { agent_id: string; disposition: string; called_at: string; note: string | null; lead_id: number }
