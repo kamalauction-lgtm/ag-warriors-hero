@@ -8,7 +8,9 @@
     "SUPABASE_URL": "https://zlbyfgfublqlrsqohvsn.supabase.co",
     "GHL_API_BASE": "https://services.leadconnectorhq.com",
     "GHL_API_VERSION": "2021-07-28",
-    "DEFAULT_COUNTRY": "MY"
+    "DEFAULT_COUNTRY": "MY",
+    "AI_PROVIDER": "gemini",
+    "GEMINI_MODEL": "gemini-flash-latest"
   },
   // expiry sweep + GHL writeback retry, every 5 minutes (spec §6)
   "triggers": {
