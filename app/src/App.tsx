@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { useApp } from './lib/store'
 import Join from './pages/Join'
+import TestMe from './modules/talent/TestMe'
 import Shell from './components/Shell'
 import Login from './pages/Login'
 import MyDay from './pages/MyDay'
@@ -29,6 +30,14 @@ export default function App() {
     return (
       <Routes>
         <Route path="/join/:code" element={<Join />} />
+      </Routes>
+    )
+  }
+  // Hero Talent Compass — public, event-code access, no login required
+  if (pathname.startsWith('/testme')) {
+    return (
+      <Routes>
+        <Route path="/testme" element={<TestMe />} />
       </Routes>
     )
   }
