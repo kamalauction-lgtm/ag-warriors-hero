@@ -30,19 +30,22 @@ def rpc(fn, args, key=ANON):
         raise SystemExit(f"{fn} failed: {e.code} {e.read().decode()[:300]}")
 
 
+# Realistic personas vary their scale answers — a real person does not answer
+# the same number 32 times. Only "uniform" does that, deliberately, to prove
+# the consistency flags fire.
 PERSONAS = {
     # a people-first agent: warm, consistent, not a self-promoter
-    "relationship": {"scale_bias": 4, "prefers": [1], "text": (
+    "relationship": {"scale_bias": 4, "vary": True, "prefers": [1], "text": (
         "Success means my family is secure and I am respected for doing honest work.",
         "I will call ten people every working day and follow up every lead within 24 hours.",
         "I lose confidence when someone rejects me twice in a row and I have no one to talk to.")},
     # a visible, fast-moving closer
-    "closer": {"scale_bias": 5, "prefers": [3], "text": (
+    "closer": {"scale_bias": 4, "vary": True, "prefers": [3], "text": (
         "Success is hitting a number I set for myself and beating it.",
         "Daily prospecting, weekly targets, and asking for the decision every time.",
         "I slow down when the paperwork drags on and nothing seems to move.")},
     # someone early in their journey, unsure
-    "emerging": {"scale_bias": 3, "prefers": [1, 2], "text": (
+    "emerging": {"scale_bias": 3, "vary": True, "prefers": [1, 2], "text": (
         "Being able to support my parents.", "Learn and try.", "Not knowing enough yet.")},
     # the straight-liner: every answer identical (should trip the flags)
     "uniform": {"scale_bias": 5, "prefers": [1], "text": ("", "", "")},
@@ -78,6 +81,9 @@ def main():
                 vals = [o["value"] for o in q["options"]]
                 if len(vals) == 5:                      # scale / frequency
                     pick = min(cfg["scale_bias"], max(vals))
+                    if cfg.get("vary"):
+                        # deterministic wobble of +/-1 so the profile looks human
+                        pick = max(1, min(5, pick + ((q["id"] % 3) - 1)))
                 else:                                   # choice / scenario
                     pick = next((v for v in cfg["prefers"] if v in vals), vals[0])
                 rpc("talent_answer", {"p_token": token, "p_question": q["id"], "p_value": pick})
