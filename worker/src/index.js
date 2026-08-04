@@ -15,6 +15,28 @@ import { generateReport } from './talentReport.js'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
+/* The participant app is served from hero.iqiaggroup.com while this Worker lives
+   on workers.dev, so every browser call to /talent/report is cross-origin and
+   needs CORS. Restricted to our own origins — this is not a public API. */
+const ALLOWED_ORIGINS = [
+  'https://hero.iqiaggroup.com',
+  'https://ag-warriors-hero.iqiaggroup.workers.dev',
+  'https://ag-warriors-hero-staging.iqiaggroup.workers.dev',
+  'http://localhost:8153',
+]
+
+function corsHeaders(request) {
+  const origin = request.headers.get('Origin') || ''
+  if (!ALLOWED_ORIGINS.includes(origin)) return {}
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  }
+}
+
 /** constant-time compare (hash_equals equivalent) */
 function safeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) return false
@@ -240,34 +262,35 @@ async function sweep(env) {
  * come from the database, not from the request body.
  */
 async function handleTalentReport(request, env) {
+  const cors = corsHeaders(request)
+  const reply = (body, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, ...cors } })
   if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: JSON_HEADERS })
+    return reply({ error: 'POST only' }, 405)
   }
   let body
-  try { body = await request.json() } catch {
-    return new Response(JSON.stringify({ error: 'bad payload' }), { status: 400, headers: JSON_HEADERS })
-  }
+  try { body = await request.json() } catch { return reply({ error: 'bad payload' }, 400) }
   const token = body?.token
   if (!token || typeof token !== 'string') {
-    return new Response(JSON.stringify({ error: 'token required' }), { status: 401, headers: JSON_HEADERS })
+    return reply({ error: 'token required' }, 401)
   }
 
   // resolve the attempt from the token (service role, server side only)
   const who = await rpc(env, 'talent_attempt_of', { p_token: token })
   const attemptId = who.body
   if (!who.ok || !attemptId) {
-    return new Response(JSON.stringify({ error: 'invalid session' }), { status: 401, headers: JSON_HEADERS })
+    return reply({ error: 'invalid session' }, 401)
   }
 
   // already generated? return it rather than paying for another call
   const existing = await rest(env, `/talent_reports?select=content,generated_by&attempt_id=eq.${attemptId}`)
   if (existing.ok && Array.isArray(existing.body) && existing.body.length && !body.regenerate) {
-    return new Response(JSON.stringify(existing.body[0].content), { headers: JSON_HEADERS })
+    return reply(existing.body[0].content)
   }
 
   const result = await rpc(env, 'talent_result', { p_attempt: attemptId })
   if (!result.ok || !result.body) {
-    return new Response(JSON.stringify({ error: 'no result yet' }), { status: 409, headers: JSON_HEADERS })
+    return reply({ error: 'no result yet' }, 409)
   }
 
   const report = await generateReport(env, result.body)
@@ -289,12 +312,15 @@ async function handleTalentReport(request, env) {
     body: JSON.stringify({ status: 'reported' }),
   })
 
-  return new Response(JSON.stringify(report), { headers: JSON_HEADERS })
+  return reply(report)
 }
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders(request) })
+    }
     if (url.pathname === '/health') {
       return new Response(JSON.stringify({ ok: true, service: 'm4u-api' }), { headers: JSON_HEADERS })
     }

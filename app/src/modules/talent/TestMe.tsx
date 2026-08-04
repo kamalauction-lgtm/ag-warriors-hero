@@ -5,8 +5,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { TL, type TLang } from './talentText'
+import TalentReport from './TalentReport'
 
 const TOKEN_KEY = 'hero-testme-token'
+// A finished attempt keeps its token under a separate key so the participant can
+// close the page and come back to their report. Clearing it on submit meant a
+// refresh on the report screen lost it for good.
+const REPORT_KEY = 'hero-testme-report'
 
 interface Option { value: number; label: string }
 interface Question {
@@ -75,13 +80,21 @@ export default function TestMe() {
 
   /* ---------- resume an existing attempt ---------- */
   useEffect(() => {
+    const finished = localStorage.getItem(REPORT_KEY)
+    if (finished) { setToken(finished); setStage('done'); return }
     const saved = localStorage.getItem(TOKEN_KEY)
     if (!saved || !supabase) return
     ;(async () => {
       const { data: form, error } = await supabase.rpc('talent_form', { p_token: saved })
       if (error || !form) { localStorage.removeItem(TOKEN_KEY); return }
       const f = form as { language: TLang; status: string; sections: Section[] }
-      if (f.status !== 'in_progress') { localStorage.removeItem(TOKEN_KEY); return }
+      if (f.status !== 'in_progress') {
+        // already submitted — show the report rather than a dead end
+        localStorage.removeItem(TOKEN_KEY)
+        localStorage.setItem(REPORT_KEY, saved)
+        setToken(saved); setLang(f.language); setStage('done')
+        return
+      }
       const { data: prog } = await supabase.rpc('talent_progress', { p_token: saved })
       const p = prog as { answers: Record<string, { value: number | null; text: string | null }>; details: Record<string, string> | null }
       const restored: Record<number, { value?: number; text?: string }> = {}
@@ -152,6 +165,7 @@ export default function TestMe() {
       await call('talent_submit', { p_token: token, p_seconds: secs })
       await call('talent_score_mine', { p_token: token })
       localStorage.removeItem(TOKEN_KEY)
+      localStorage.setItem(REPORT_KEY, token!)
       setStage('done')
     } catch (e) { setErr((e as Error).message) }
     setBusy(false)
@@ -362,14 +376,10 @@ export default function TestMe() {
     )
   }
 
-  /* ---------------- stage: done ---------------- */
+  /* ---------------- stage: done — the report itself ---------------- */
   return (
     <Shell eventName={eventName}>
-      <div className="rounded-2xl border border-border bg-surface p-6 text-center">
-        <p className="mb-2 text-3xl">🧭</p>
-        <p className="font-display text-base font-extrabold">{t.thanks}</p>
-        <p className="mx-auto mt-2 max-w-xs text-sm text-muted">{t.reportComing}</p>
-      </div>
+      <TalentReport token={token ?? ''} name={details.preferred || details.full_name} />
     </Shell>
   )
 }
