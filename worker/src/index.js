@@ -11,6 +11,8 @@
  * only authenticates, extracts fields and calls the m4u_intake RPC.
  */
 
+import { generateReport } from './talentReport.js'
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 /** constant-time compare (hash_equals equivalent) */
@@ -232,6 +234,64 @@ async function sweep(env) {
   return { expired: expired.body ?? 0, ...sync }
 }
 
+/* ---------------- Hero Talent Compass report ----------------
+ * The participant's own token is the only credential. We never trust a client
+ * to tell us who they are: the token is resolved server-side, and the scores
+ * come from the database, not from the request body.
+ */
+async function handleTalentReport(request, env) {
+  if (request.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'POST only' }), { status: 405, headers: JSON_HEADERS })
+  }
+  let body
+  try { body = await request.json() } catch {
+    return new Response(JSON.stringify({ error: 'bad payload' }), { status: 400, headers: JSON_HEADERS })
+  }
+  const token = body?.token
+  if (!token || typeof token !== 'string') {
+    return new Response(JSON.stringify({ error: 'token required' }), { status: 401, headers: JSON_HEADERS })
+  }
+
+  // resolve the attempt from the token (service role, server side only)
+  const who = await rpc(env, 'talent_attempt_of', { p_token: token })
+  const attemptId = who.body
+  if (!who.ok || !attemptId) {
+    return new Response(JSON.stringify({ error: 'invalid session' }), { status: 401, headers: JSON_HEADERS })
+  }
+
+  // already generated? return it rather than paying for another call
+  const existing = await rest(env, `/talent_reports?select=content,generated_by&attempt_id=eq.${attemptId}`)
+  if (existing.ok && Array.isArray(existing.body) && existing.body.length && !body.regenerate) {
+    return new Response(JSON.stringify(existing.body[0].content), { headers: JSON_HEADERS })
+  }
+
+  const result = await rpc(env, 'talent_result', { p_attempt: attemptId })
+  if (!result.ok || !result.body) {
+    return new Response(JSON.stringify({ error: 'no result yet' }), { status: 409, headers: JSON_HEADERS })
+  }
+
+  const report = await generateReport(env, result.body)
+
+  await rest(env, '/talent_reports?on_conflict=attempt_id', {
+    method: 'POST',
+    headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify([{
+      attempt_id: attemptId,
+      language: result.body.language,
+      generated_by: report.generated_by,
+      model: report.model ?? null,
+      content: report,
+    }]),
+  })
+  await rest(env, `/talent_attempts?id=eq.${attemptId}`, {
+    method: 'PATCH',
+    headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ status: 'reported' }),
+  })
+
+  return new Response(JSON.stringify(report), { headers: JSON_HEADERS })
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
@@ -239,6 +299,7 @@ export default {
       return new Response(JSON.stringify({ ok: true, service: 'm4u-api' }), { headers: JSON_HEADERS })
     }
     if (url.pathname === '/webhook') return handleWebhook(request, env, url)
+    if (url.pathname === '/talent/report') return handleTalentReport(request, env)
     if (url.pathname === '/sweep') {
       const provided = request.headers.get('X-Webhook-Secret') || url.searchParams.get('key') || ''
       if (!safeEqual(provided, env.WEBHOOK_SECRET || '')) {
