@@ -214,7 +214,7 @@ export default function ReviewQueue() {
                 <p className="text-xs font-bold">Invite for {lastInvite.name} — code {lastInvite.code}</p>
                 <a target="_blank" rel="noreferrer"
                   href={`https://wa.me/${lastInvite.phone.replace('+', '')}?text=${encodeURIComponent(
-                    `Salam ${lastInvite.name}! 🛡 You are invited to join IQI AG Hero — our Warriors platform. Accept here: https://hero.iqiaggroup.com/#/join/${lastInvite.code}`)}`}
+                    `Salam ${lastInvite.name}! 🛡 You are invited to join IQI AG Hero — our Warriors platform. Accept here: https://hero.iqiaggroup.com/join/${lastInvite.code}`)}`}
                   className="mt-2 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-xl bg-success text-xs font-extrabold text-white">
                   📲 Send via WhatsApp
                 </a>
