@@ -29,6 +29,25 @@ function shuffled<T>(arr: T[], seed: number): T[] {
   return a
 }
 
+/* Defined at module scope on purpose. A component declared INSIDE TestMe gets a
+   new identity on every render, so React unmounts and remounts the whole tree
+   each keystroke — which is what made the text cursor jump out of the field. */
+function Shell({ eventName, children }: { eventName: string; children: React.ReactNode }) {
+  return (
+    <div className="min-h-dvh bg-bg px-4 py-6">
+      <div className="mx-auto w-full max-w-lg">
+        <header className="mb-5 text-center">
+          <h1 className="font-display text-xl font-extrabold tracking-tight">
+            Hero <span className="gold-text">Talent Compass</span>
+          </h1>
+          <p className="text-[11px] text-muted">{eventName || 'IQI AG Hero'}</p>
+        </header>
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export default function TestMe() {
   const [lang, setLang] = useState<TLang>('en')
   const [stage, setStage] = useState<Stage>('code')
@@ -138,21 +157,6 @@ export default function TestMe() {
     setBusy(false)
   }
 
-  /* ---------------- shared chrome ---------------- */
-  const Shell = ({ children }: { children: React.ReactNode }) => (
-    <div className="min-h-dvh bg-bg px-4 py-6">
-      <div className="mx-auto w-full max-w-lg">
-        <header className="mb-5 text-center">
-          <h1 className="font-display text-xl font-extrabold tracking-tight">
-            Hero <span className="gold-text">Talent Compass</span>
-          </h1>
-          <p className="text-[11px] text-muted">{eventName || 'IQI AG Hero'}</p>
-        </header>
-        {children}
-      </div>
-    </div>
-  )
-
   const langPicker = (
     <div className="mb-4 flex justify-center gap-1.5">
       {(['ms-MY', 'en', 'id-ID'] as TLang[]).map((l) => (
@@ -167,7 +171,7 @@ export default function TestMe() {
 
   /* ---------------- stage: code ---------------- */
   if (stage === 'code') return (
-    <Shell>
+    <Shell eventName={eventName}>
       {langPicker}
       <div className="rounded-2xl border border-border bg-surface p-5">
         <p className="mb-1 text-sm font-bold">{t.welcome}</p>
@@ -191,7 +195,7 @@ export default function TestMe() {
     const acksOk = details.ack1 && details.ack2 && details.ack3 && details.ack4
     const ready = details.full_name.trim() && details.experience && details.leadership && acksOk
     return (
-      <Shell>
+      <Shell eventName={eventName}>
         <div className="rounded-2xl border border-border bg-surface p-5">
           <p className="mb-3 text-sm font-bold">{t.aboutYou}</p>
           {([['full_name', t.fullName], ['preferred', t.preferredName], ['contact', t.contact]] as const).map(([k, label]) => (
@@ -263,7 +267,7 @@ export default function TestMe() {
     const canNext = !current.required || a.value !== undefined || (a.text ?? '').trim() !== ''
 
     return (
-      <Shell>
+      <Shell eventName={eventName}>
         <div className="mb-3">
           <div className="mb-1 flex justify-between text-[11px] text-muted">
             <span>{current.section.title}</span>
@@ -329,7 +333,7 @@ export default function TestMe() {
     const missing = flat.filter((q) => q.required && answers[q.id]?.value === undefined
       && (answers[q.id]?.text ?? '').trim() === '')
     return (
-      <Shell>
+      <Shell eventName={eventName}>
         <div className="rounded-2xl border border-border bg-surface p-5">
           <p className="mb-2 text-sm font-bold">{t.reviewTitle}</p>
           <p className="mb-4 text-xs text-muted">
@@ -360,7 +364,7 @@ export default function TestMe() {
 
   /* ---------------- stage: done ---------------- */
   return (
-    <Shell>
+    <Shell eventName={eventName}>
       <div className="rounded-2xl border border-border bg-surface p-6 text-center">
         <p className="mb-2 text-3xl">🧭</p>
         <p className="font-display text-base font-extrabold">{t.thanks}</p>
