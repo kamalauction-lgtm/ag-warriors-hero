@@ -30,7 +30,7 @@ interface Session {
   checkin_code: string | null
 }
 interface Reg {
-  id: number; name: string; phone: string; friends: string | null
+  id: number; name: string; phone: string; email: string | null; friends: string | null
   attended: boolean | null; source: string | null; created_at: string
 }
 
@@ -241,11 +241,11 @@ export default function KamalagSessions() {
                   <div style={{ flexBasis: '100%', marginTop: 8, borderTop: '1px solid var(--line,#333)', paddingTop: 8 }}>
                     {!regs.length ? <p style={{ opacity: 0.7, margin: 0 }}>No sign-ups yet.</p> : (
                       <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                        <thead><tr style={{ textAlign: 'left', opacity: 0.7 }}><th>Name</th><th>WhatsApp</th><th>Friends</th><th>Present</th></tr></thead>
+                        <thead><tr style={{ textAlign: 'left', opacity: 0.7 }}><th>Name</th><th>WhatsApp</th><th>Email</th><th>Friends</th><th>Present</th></tr></thead>
                         <tbody>
                           {regs.map((r) => (
                             <tr key={r.id} style={{ borderTop: '1px solid var(--line,#2a2a2a)' }}>
-                              <td>{r.name}</td><td>{r.phone}</td><td>{r.friends || '—'}</td><td>{r.attended ? '✓' : '—'}</td>
+                              <td>{r.name}</td><td>{r.phone}</td><td>{r.email || '—'}</td><td>{r.friends || '—'}</td><td>{r.attended ? '✓' : '—'}</td>
                             </tr>
                           ))}
                         </tbody>
