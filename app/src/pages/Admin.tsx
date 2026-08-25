@@ -2,7 +2,7 @@
    Sections: Dashboard (whole business) · People · Sales · Activity · Elite ·
    Booths · Caller/M4U (one function, with its own sub-tabs) · Content ·
    Rewards · Country Settings */
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
@@ -31,100 +31,235 @@ import {
   AlertTriangle,
   Timer,
   BellRing,
+  Sun,
+  Moon,
+  Ticket,
+  Award,
   Rocket,
+  Compass,
+  GraduationCap,
+  Camera,
+  Library,
+  RefreshCw,
+  Mic,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { Avatar, Bar, Card, Chip } from '../components/ui'
-import { setBrand, useBrand, type BrandCountry, type BrandSlot } from '../lib/brand'
+import { resetBrand, setBrandFile, useBrand, type BrandCountry, type BrandSlot } from '../lib/brand'
 import { getIncomeCfg, setIncomeCfg, useIncomeCfg } from '../lib/income'
 import { supabase, supabaseReady } from '../lib/supabase'
+import { exportCsv } from '../lib/csv'
 import ChallengeReports from '../modules/challenge/Reports'
 import Coaches from '../modules/challenge/Coaches'
+import Enrolment from '../modules/challenge/Enrolment'
+import Health from '../modules/challenge/Health'
+import Governance from '../modules/challenge/Governance'
 import CallerAdmin from '../modules/caller/CallerAdmin'
-import { useEffect } from 'react'
+import TalentAdmin from '../modules/talent/TalentAdmin'
+import OnbAdmin from '../modules/onboarding/OnbAdmin'
+import SocialAdmin from '../modules/social/SocialAdmin'
+import AtlasAdmin from '../modules/atlas/AtlasAdmin'
+import AcademyAdmin from '../modules/academy/AcademyAdmin'
+import EventsAdmin from '../modules/events/EventsAdmin'
+import KamalagSessions from '../modules/events/KamalagSessions'
+import CertTemplates from '../modules/events/CertTemplates'
+import { BadgeRow } from '../components/Badges'
+import WarriorProfile from '../components/WarriorProfile'
 import './admin.css'
 
-/* Curriculum editor — DB-driven days, per-language editing (Super Admin) */
+/* Curriculum editor — versioned, country-aware, audited (Super Admin).
+   Three things changed after the 2026-08-23 audit:
+     1. it filters by VERSION and by country variant (it used to select every row,
+        which now means duplicate day numbers once v2 exists);
+     2. it saves through fn_admin_save_day, which writes an audit event and REFUSES
+        to rewrite a published day that warriors have already answered;
+     3. a country variant still marked CONTENT REQUIRED is shown as such — warriors
+        never see it, they get the generic row. */
 const LANGS = ['en', 'ms-MY', 'id-ID'] as const
 type J = Record<string, string>
 interface CurDay {
-  id: string; day_no: number; phase: number; xp_amount: number
-  title: J; objective: J; content: J; required_action: J
-  evidence_requirement: J; reflection_question: J
+  id: string; version_id: string; day_no: number; phase: number; xp_amount: number
+  country_override: string | null; content_status: string; content_note: string | null
+  proof_type: string | null
+  title: J; objective: J; content: J; instructions: J | null; required_action: J
+  stretch_action: J | null; evidence_requirement: J; reflection_question: J; coach_guidance: J | null
 }
+interface Ver { id: string; version: number; status: string }
+
 function CurriculumEditor({ realId, onSaved }: { realId: boolean; onSaved: (m: string) => void }) {
+  const [vers, setVers] = useState<Ver[]>([])
+  const [verId, setVerId] = useState('')
   const [days, setDays] = useState<CurDay[]>([])
   const [lang, setLang] = useState<(typeof LANGS)[number]>('en')
-  const [open, setOpen] = useState<number | null>(null)
+  const [scope, setScope] = useState<'GENERIC' | 'MY' | 'ID'>('GENERIC')
+  const [open, setOpen] = useState<string | null>(null)
   const [draft, setDraft] = useState<Partial<CurDay>>({})
-  useEffect(() => {
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
     if (!realId || !supabase) return
-    supabase.from('curriculum_days').select('*').order('day_no')
-      .then(({ data }) => setDays((data as CurDay[]) ?? []))
-  }, [realId])
+    const { data: vs } = await supabase.from('curriculum_versions')
+      .select('id,version,status').order('version', { ascending: false })
+    const list = (vs as Ver[]) ?? []
+    setVers(list)
+    const target = verId || list.find((v) => v.status === 'published')?.id || list[0]?.id || ''
+    if (!target) { setDays([]); return }
+    if (target !== verId) setVerId(target)
+    const { data } = await supabase.from('curriculum_days').select('*')
+      .eq('version_id', target).order('day_no')
+    setDays((data as CurDay[]) ?? [])
+  }, [realId, verId])
+  useEffect(() => { load() }, [load])
+
   if (!realId) return <Card className="p-6 text-center text-sm text-muted">Sign in with your real account to edit the live curriculum.</Card>
-  const F: [keyof CurDay, string][] = [
-    ['title', 'Title'], ['objective', 'Objective'], ['content', 'Learning content'],
-    ['required_action', 'Required action'], ['evidence_requirement', 'Evidence'], ['reflection_question', 'Reflection'],
+
+  const F: [keyof CurDay, string, number][] = [
+    ['title', 'Title', 2], ['objective', 'Objective', 2], ['content', 'Learning content', 4],
+    ['instructions', 'Instructions (how to do it in Hero)', 3],
+    ['required_action', 'Required action', 3], ['stretch_action', 'Optional stretch', 2],
+    ['evidence_requirement', 'Evidence requirement', 2], ['reflection_question', 'Reflection question', 2],
+    ['coach_guidance', 'Coach guidance (what to verify)', 3],
   ]
+  const ver = vers.find((v) => v.id === verId)
+  const shown = days.filter((d) => (scope === 'GENERIC' ? d.country_override === null : d.country_override === scope))
+  const gaps = days.filter((d) => d.content_status === 'content_required')
+
   const save = async (d: CurDay) => {
     if (!supabase) return
+    setBusy(true)
     const patch: Record<string, unknown> = {}
     F.forEach(([k]) => {
       const dv = draft[k] as J | undefined
-      if (dv) patch[k as string] = { ...(d[k] as J), ...dv }
+      if (dv) patch[k as string] = { ...((d[k] as J) ?? {}), ...dv }
     })
     if (draft.xp_amount != null) patch.xp_amount = draft.xp_amount
-    const { error } = await supabase.from('curriculum_days').update(patch).eq('id', d.id)
-    if (error) onSaved('⚠ ' + error.message)
-    else {
-      onSaved(`Day ${d.day_no} saved (${lang}) — live for all cohorts on v1`)
-      setDays((ds) => ds.map((x) => (x.id === d.id ? { ...x, ...patch } as CurDay : x)))
-      setDraft({}); setOpen(null)
-    }
+    if (draft.content_status) patch.content_status = draft.content_status
+    if (Object.keys(patch).length === 0) { setBusy(false); onSaved('Nothing changed'); return }
+    const { error } = await supabase.rpc('fn_admin_save_day', { p_day: d.id, p_patch: patch })
+    setBusy(false)
+    if (error) { onSaved('WARN ' + error.message); return }
+    onSaved('Day ' + d.day_no + (d.country_override ? ' (' + d.country_override + ')' : '') + ' saved - audited')
+    setDraft({}); setOpen(null); load()
   }
+
   return (
     <>
-      <div className="mb-3 flex items-center gap-1.5">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <select value={verId} onChange={(e) => { setVerId(e.target.value); setOpen(null) }}
+          aria-label="Curriculum version"
+          className="h-9 cursor-pointer rounded-xl border border-border bg-surface px-3 text-xs font-bold outline-none">
+          {vers.map((v) => <option key={v.id} value={v.id}>v{v.version} · {v.status}</option>)}
+        </select>
+        {(['GENERIC', 'MY', 'ID'] as const).map((c) => (
+          <button key={c} type="button" onClick={() => { setScope(c); setOpen(null) }}
+            className={clsx('cursor-pointer rounded-full border px-3 py-1.5 text-xs font-extrabold',
+              scope === c ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted')}>
+            {c === 'GENERIC' ? 'Generic' : c === 'MY' ? 'MY' : 'ID'}
+          </button>
+        ))}
+        <span className="w-2" />
         {LANGS.map((l) => (
           <button key={l} type="button" onClick={() => setLang(l)}
-            className={clsx('cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-extrabold', lang === l ? 'border-accent bg-accent text-on-accent' : 'border-border text-muted hover:text-ink')}>
+            className={clsx('cursor-pointer rounded-full border px-3 py-1.5 text-xs font-extrabold', lang === l ? 'border-accent bg-accent text-on-accent' : 'border-border text-muted hover:text-ink')}>
             {l}
           </button>
         ))}
-        <Chip tone="accent" className="ml-auto">DB-driven · edits go live instantly</Chip>
       </div>
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <button type="button" disabled={busy || !verId}
+          onClick={async () => {
+            if (!supabase) return
+            setBusy(true)
+            const { error } = await supabase.rpc('fn_admin_new_version', { p_from: verId, p_note: 'copied from v' + (ver?.version ?? '?') })
+            setBusy(false)
+            if (error) onSaved('WARN ' + error.message)
+            else { onSaved('New draft version created'); setVerId(''); load() }
+          }}
+          className="h-9 cursor-pointer rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">
+          + New draft version
+        </button>
+        {ver?.status === 'draft' && (
+          <button type="button" disabled={busy}
+            onClick={async () => {
+              if (!supabase) return
+              setBusy(true)
+              const { error } = await supabase.rpc('fn_admin_publish_version', { p_version: verId, p_note: 'published from Command HQ' })
+              setBusy(false)
+              if (error) onSaved('WARN ' + error.message); else { onSaved('Version published'); load() }
+            }}
+            className="h-9 cursor-pointer rounded-xl bg-accent px-3 text-xs font-extrabold text-on-accent disabled:opacity-40">
+            Publish v{ver.version}
+          </button>
+        )}
+      </div>
+
+      {gaps.length > 0 && (
+        <Card className="mb-3 border-warning/50 bg-warning/10 p-3.5">
+          <p className="text-xs font-extrabold text-warning">
+            {gaps.length} country row(s) awaiting authorised local content
+          </p>
+          <p className="mt-1 text-[11px] text-muted">
+            Days {[...new Set(gaps.map((g) => g.day_no))].join(', ')}. Until each is written and set to
+            <b> ok</b>, warriors read the generic row — Hero never substitutes the other country&apos;s content.
+          </p>
+        </Card>
+      )}
+
+      {shown.length === 0 && (
+        <Card className="p-6 text-center text-xs text-muted">
+          {scope === 'GENERIC' ? 'This version has no days yet.' : 'No ' + scope + ' variants exist in this version.'}
+        </Card>
+      )}
+
       <div className="space-y-1.5">
-        {days.map((d) => (
+        {shown.map((d) => (
           <Card key={d.id} className="overflow-hidden">
-            <button type="button" onClick={() => { setOpen(open === d.day_no ? null : d.day_no); setDraft({}) }}
+            <button type="button" onClick={() => { setOpen(open === d.id ? null : d.id); setDraft({}) }}
               className="flex w-full cursor-pointer items-center gap-3 p-3 text-left">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-soft font-display text-xs font-extrabold text-accent">{d.day_no}</span>
               <span className="min-w-0 flex-1 truncate text-sm font-bold">{d.title?.[lang] ?? d.title?.en}</span>
+              {d.content_status === 'content_required' && <Chip tone="warning">CONTENT REQUIRED</Chip>}
+              {d.proof_type === 'native_record' && <Chip tone="success">system evidence</Chip>}
               <Chip>P{d.phase}</Chip><Chip tone="accent">{d.xp_amount} XP</Chip>
             </button>
-            {open === d.day_no && (
+            {open === d.id && (
               <div className="border-t border-border bg-surface2/40 p-3.5">
-                {F.map(([k, label]) => (
+                {d.content_note && (
+                  <p className="mb-3 rounded-lg bg-warning/10 p-2.5 text-[11px] font-semibold text-warning">
+                    Authoring brief: {d.content_note}
+                  </p>
+                )}
+                {F.map(([k, label, rows]) => (
                   <div key={k as string} className="mb-2.5">
                     <label className="mb-1 block text-[10px] font-bold uppercase text-muted">{label} · {lang}</label>
-                    <textarea rows={k === 'content' ? 3 : 2}
-                      defaultValue={(d[k] as J)?.[lang] ?? ''}
+                    <textarea rows={rows}
+                      defaultValue={(d[k] as J | null)?.[lang] ?? ''}
                       onChange={(e) => setDraft((dr) => ({ ...dr, [k]: { ...((dr[k] as J) ?? {}), [lang]: e.target.value } }))}
                       className="w-full rounded-xl border border-border bg-surface p-2.5 text-sm outline-none focus:border-accent" />
                   </div>
                 ))}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <label className="text-[10px] font-bold uppercase text-muted">XP</label>
-                  <input type="number" defaultValue={d.xp_amount}
+                  <input type="number" defaultValue={d.xp_amount} aria-label="XP amount"
                     onChange={(e) => setDraft((dr) => ({ ...dr, xp_amount: Number(e.target.value) || d.xp_amount }))}
                     className="w-20 rounded-lg border border-border bg-surface px-2 py-1.5 text-center text-sm font-bold outline-none focus:border-accent" />
-                  <button type="button" onClick={() => save(d)}
-                    className="ml-auto cursor-pointer rounded-xl bg-accent px-5 py-2.5 text-xs font-extrabold text-on-accent hover:opacity-90">
-                    💾 Save Day {d.day_no}
+                  <label className="text-[10px] font-bold uppercase text-muted">Status</label>
+                  <select defaultValue={d.content_status} aria-label="Content status"
+                    onChange={(e) => setDraft((dr) => ({ ...dr, content_status: e.target.value }))}
+                    className="h-9 cursor-pointer rounded-lg border border-border bg-surface px-2 text-xs font-bold outline-none">
+                    {['ok', 'draft', 'content_required'].map((x) => <option key={x} value={x}>{x}</option>)}
+                  </select>
+                  <button type="button" disabled={busy} onClick={() => save(d)}
+                    className="ml-auto cursor-pointer rounded-xl bg-accent px-5 py-2.5 text-xs font-extrabold text-on-accent hover:opacity-90 disabled:opacity-40">
+                    Save Day {d.day_no}
                   </button>
                 </div>
+                <p className="mt-2 text-[10px] text-muted">
+                  Saving writes an audit event. On a published version, a day that warriors have already
+                  answered cannot have its required action, evidence or XP rewritten — create a new version instead.
+                </p>
               </div>
             )}
           </Card>
@@ -146,46 +281,69 @@ function ChallengeProgress({ realId }: { realId: boolean }) {
   const [ready, setReady] = useState<Record<string, string>>({})
   const [tasks, setTasks] = useState<Record<string, { sub: number; ok: number; last: string }>>({})
   const [xp, setXp] = useState<Record<string, number>>({})
-  const [dayNow, setDayNow] = useState<Record<string, number>>({})
+  const [cohortDay, setCohortDay] = useState<Record<string, number>>({})
+  const [accDay, setAccDay] = useState<Record<string, number>>({})
   const [err, setErr] = useState('')
+  /* audit fix — this table used to have no loading state, no refetch and rendered
+     stale rows underneath an error message, so a row deleted in SQL kept showing. */
+  const [state, setState] = useState<'loading' | 'error' | 'ready'>('loading')
+  const [asOf, setAsOf] = useState('')
 
-  useEffect(() => {
-    if (!realId || !supabase) return
-    ;(async () => {
-      const { data: es, error } = await supabase.from('enrolments')
-        .select('id,status,catch_up,cohort_id,participant_id,profiles!enrolments_participant_id_fkey(name,country),cohorts(name)')
-        .order('created_at')
-      if (error) { setErr(error.message); return }
-      const list = (es as unknown as ChRow[]) ?? []
-      setRows(list)
-      const { data: rs } = await supabase.from('readiness_submissions')
-        .select('enrolment_id,status,created_at').order('created_at', { ascending: false })
-      const rm: Record<string, string> = {}
-      ;(rs ?? []).forEach((r: { enrolment_id: string; status: string }) => { if (!rm[r.enrolment_id]) rm[r.enrolment_id] = r.status })
-      setReady(rm)
-      const { data: ts } = await supabase.from('task_submissions').select('enrolment_id,day_no,status')
-      const tm: Record<string, { sub: number; ok: number; last: string }> = {}
-      ;(ts ?? []).forEach((t: { enrolment_id: string; day_no: number; status: string }) => {
-        const e = tm[t.enrolment_id] ?? { sub: 0, ok: 0, last: '' }
-        if (t.status === 'approved') e.ok++
-        else if (['submitted', 'under_review'].includes(t.status)) e.sub++
-        e.last = `D${t.day_no} ${t.status}`
-        tm[t.enrolment_id] = e
-      })
-      setTasks(tm)
-      const { data: pl } = await supabase.from('points_ledger').select('user_id,amount').eq('status', 'verified')
-      const xm: Record<string, number> = {}
-      ;(pl ?? []).forEach((p: { user_id: string; amount: number }) => { xm[p.user_id] = (xm[p.user_id] ?? 0) + p.amount })
-      setXp(xm)
-      const cids = [...new Set(list.map((r) => r.cohort_id))]
-      const dm: Record<string, number> = {}
-      for (const c of cids) {
-        const { data: d } = await supabase.rpc('cohort_day', { p_cohort: c })
-        dm[c] = (d as number) ?? 0
-      }
-      setDayNow(dm)
-    })()
+  const load = useCallback(async () => {
+    if (!realId || !supabase) { setState('ready'); return }
+    setState('loading'); setErr('')
+    const { data: es, error } = await supabase.from('enrolments')
+      .select('id,status,catch_up,cohort_id,participant_id,profiles!enrolments_participant_id_fkey(name,country),cohorts(name)')
+      .order('created_at')
+    if (error) { setErr(error.message); setState('error'); setRows([]); return }
+    const list = (es as unknown as ChRow[]) ?? []
+    setRows(list)
+    const { data: rs } = await supabase.from('readiness_submissions')
+      .select('enrolment_id,status,created_at').order('created_at', { ascending: false })
+    const rm: Record<string, string> = {}
+    ;(rs ?? []).forEach((r: { enrolment_id: string; status: string }) => { if (!rm[r.enrolment_id]) rm[r.enrolment_id] = r.status })
+    setReady(rm)
+    /* dedupe resubmissions by (enrolment, day) — keep the newest version only,
+       otherwise a warrior who resubmits twice reads as three tasks. */
+    const { data: ts } = await supabase.from('task_submissions')
+      .select('enrolment_id,day_no,status,version').order('version')
+    const latest: Record<string, { status: string; day: number }> = {}
+    ;(ts ?? []).forEach((t: { enrolment_id: string; day_no: number; status: string; version: number }) => {
+      latest[`${t.enrolment_id}|${t.day_no}`] = { status: t.status, day: t.day_no }
+    })
+    const tm: Record<string, { sub: number; ok: number; last: string }> = {}
+    Object.entries(latest).forEach(([k, v]) => {
+      const eid = k.split('|')[0]
+      const e = tm[eid] ?? { sub: 0, ok: 0, last: '—' }
+      if (v.status === 'approved') e.ok++
+      else if (['submitted', 'under_review'].includes(v.status)) e.sub++
+      e.last = `D${v.day} ${v.status}`
+      tm[eid] = e
+    })
+    setTasks(tm)
+    const { data: pl } = await supabase.from('points_ledger').select('user_id,amount').eq('status', 'verified')
+    const xm: Record<string, number> = {}
+    ;(pl ?? []).forEach((p: { user_id: string; amount: number }) => { xm[p.user_id] = (xm[p.user_id] ?? 0) + p.amount })
+    setXp(xm)
+    const dm: Record<string, number> = {}
+    await Promise.all([...new Set(list.map((r) => r.cohort_id))].map(async (c) => {
+      const { data: d } = await supabase!.rpc('cohort_day', { p_cohort: c })
+      dm[c] = (d as number) ?? 0
+    }))
+    setCohortDay(dm)
+    /* THE day-column fix — the participant's own accessible day, per enrolment.
+       The cohort clock is a property of the cohort and must never be printed
+       on an onboarding row as if it were that warrior's progress. */
+    const am: Record<string, number> = {}
+    await Promise.all(list.map(async (r) => {
+      const { data: d } = await supabase!.rpc('participant_accessible_day', { p_enrolment: r.id })
+      am[r.id] = (d as number) ?? 0
+    }))
+    setAccDay(am)
+    setAsOf(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    setState('ready')
   }, [realId])
+  useEffect(() => { load() }, [load])
 
   const STAGE: Record<string, 'success' | 'warning' | 'info' | 'accent' | 'default' | 'danger'> = {
     active: 'success', onboarding: 'warning', invited: 'info', ready: 'accent',
@@ -194,41 +352,62 @@ function ChallengeProgress({ realId }: { realId: boolean }) {
   if (!realId) return <Card className="p-6 text-center text-sm text-muted">Sign in with your real account on production to see live programme data.</Card>
   return (
     <>
-      {err && <p className="mb-3 rounded-lg bg-danger/10 p-2 text-xs font-bold text-danger">⚠ {err}</p>}
-      <Card className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
-              <th className="px-4 py-3">Warrior</th><th className="px-2 py-3">Cohort</th>
-              <th className="px-2 py-3">Stage</th><th className="px-2 py-3">Readiness</th>
-              <th className="px-2 py-3">Day</th><th className="px-2 py-3">Tasks ✓/⏳</th>
-              <th className="px-2 py-3">Latest</th><th className="px-4 py-3 text-right">Verified XP</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-xs text-muted">No enrolments yet.</td></tr>}
-            {rows.map((r) => {
-              const t = tasks[r.id] ?? { sub: 0, ok: 0, last: '—' }
-              return (
-                <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
-                  <td className="px-4 py-3 font-semibold">
-                    {r.profiles?.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.profiles?.name ?? '—'}
-                    {r.catch_up && <Chip tone="warning" className="ml-1.5">catch-up</Chip>}
-                  </td>
-                  <td className="px-2 py-3 text-xs">{r.cohorts?.name ?? '—'}</td>
-                  <td className="px-2 py-3"><Chip tone={STAGE[r.status] ?? 'default'}>{r.status}</Chip></td>
-                  <td className="px-2 py-3"><Chip tone={ready[r.id] === 'approved' ? 'success' : ready[r.id] === 'submitted' ? 'warning' : 'default'}>{ready[r.id] ?? '—'}</Chip></td>
-                  <td className="px-2 py-3 font-bold">{dayNow[r.cohort_id] ?? '—'}/30</td>
-                  <td className="px-2 py-3">{t.ok} ✓ · {t.sub} ⏳</td>
-                  <td className="px-2 py-3 text-xs text-muted">{t.last}</td>
-                  <td className="px-4 py-3 text-right font-display font-extrabold text-accent">{xp[r.participant_id] ?? 0}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-        <p className="p-4 text-[11px] text-muted">Stages: invited → onboarding → ready → active → completed → graduated. Approvals stay human-only in the Coach Queue.</p>
-      </Card>
+      <div className="mb-3 flex items-center gap-2">
+        <button type="button" onClick={load} disabled={state === 'loading'}
+          className="flex h-9 cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">
+          <RefreshCw size={13} className={state === 'loading' ? 'animate-spin' : ''} /> Refresh
+        </button>
+        {state === 'ready' && asOf && <span className="text-[11px] text-muted">as of {asOf}</span>}
+      </div>
+      {state === 'error' && (
+        <Card className="p-6 text-center">
+          <p className="text-sm font-bold text-danger">⚠ Could not load programme data</p>
+          <p className="mt-1 text-xs text-muted">{err}</p>
+          <p className="mt-2 text-[11px] text-muted">Nothing is shown rather than showing you numbers that may be stale.</p>
+        </Card>
+      )}
+      {state === 'loading' && <Card className="p-6 text-center text-xs text-muted">Loading live programme data…</Card>}
+      {state === 'ready' && (
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[820px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
+                <th className="px-4 py-3">Warrior</th><th className="px-2 py-3">Cohort</th>
+                <th className="px-2 py-3">Stage</th><th className="px-2 py-3">Readiness</th>
+                <th className="px-2 py-3">Cohort day</th><th className="px-2 py-3">Their day</th>
+                <th className="px-2 py-3">Tasks ✓/⏳</th>
+                <th className="px-2 py-3">Latest</th><th className="px-4 py-3 text-right">Verified XP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-xs text-muted">No Warriors are enrolled in this cohort yet.</td></tr>}
+              {rows.map((r) => {
+                const t = tasks[r.id] ?? { sub: 0, ok: 0, last: '—' }
+                return (
+                  <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
+                    <td className="px-4 py-3 font-semibold">
+                      {r.profiles?.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.profiles?.name ?? '—'}
+                      {r.catch_up && <Chip tone="warning" className="ml-1.5">catch-up</Chip>}
+                    </td>
+                    <td className="px-2 py-3 text-xs">{r.cohorts?.name ?? '—'}</td>
+                    <td className="px-2 py-3"><Chip tone={STAGE[r.status] ?? 'default'}>{r.status}</Chip></td>
+                    <td className="px-2 py-3"><Chip tone={ready[r.id] === 'approved' ? 'success' : ready[r.id] === 'submitted' ? 'warning' : 'default'}>{ready[r.id] ?? '—'}</Chip></td>
+                    <td className="px-2 py-3 text-xs text-muted">{cohortDay[r.cohort_id] ?? '—'}/30</td>
+                    <td className="px-2 py-3 font-bold">{r.status === 'active' ? `${accDay[r.id] ?? 0}/30` : '—'}</td>
+                    <td className="px-2 py-3">{t.ok} ✓ · {t.sub} ⏳</td>
+                    <td className="px-2 py-3 text-xs text-muted">{t.last}</td>
+                    <td className="px-4 py-3 text-right font-display font-extrabold text-accent">{xp[r.participant_id] ?? 0}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="p-4 text-[11px] text-muted">
+            <b>Cohort day</b> = where the cohort is on the calendar. <b>Their day</b> = the latest day this warrior may open (blank until ACTIVE).
+            Stages: invited → onboarding → ready → active → completed → graduated. Approvals stay human-only in the Coach Queue.
+          </p>
+        </Card>
+      )}
     </>
   )
 }
@@ -238,8 +417,10 @@ function ChallengeProgress({ realId }: { realId: boolean }) {
 function IncomeRules({ country, onSaved }: { country: 'MY' | 'ID'; onSaved: (m: string) => void }) {
   const cfg = useIncomeCfg(country)
   const save = (patch: Partial<typeof cfg>) => {
-    setIncomeCfg(country, { ...getIncomeCfg(country), ...patch })
-    onSaved(`${country} income rules updated — live in every calculator`)
+    setIncomeCfg(country, { ...getIncomeCfg(country), ...patch }).then((err) =>
+      onSaved(err
+        ? `⚠ ${country} save failed: ${err}`
+        : `${country} income rules saved — live for every agent`))
   }
   const num = 'w-16 rounded-lg border border-border bg-surface px-1.5 py-1.5 text-center text-xs font-bold outline-none focus:border-accent'
   return (
@@ -399,8 +580,8 @@ function IncomeRules({ country, onSaved }: { country: 'MY' | 'ID'; onSaved: (m: 
   )
 }
 
-/* One uploadable brand slot (logo / mascot). Prototype stores locally;
-   real build: Supabase Storage + version history (v1, v2, v3…). */
+/* One uploadable brand slot (logo / mascot) — Supabase Storage with
+   version history (v1, v2, v3… kept; Reset deactivates, files stay). */
 function BrandSlotEditor({
   country,
   slot,
@@ -417,12 +598,8 @@ function BrandSlotEditor({
   const current = useBrand(country, slot)
   const inputId = `up-${country}-${slot}`
   const onPick = (f: File) => {
-    const r = new FileReader()
-    r.onload = () => {
-      setBrand(country, slot, String(r.result))
-      onSaved(`${label} updated — live everywhere instantly`)
-    }
-    r.readAsDataURL(f)
+    setBrandFile(country, slot, f).then((err) =>
+      onSaved(err ? `⚠ ${label} upload failed: ${err}` : `${label} updated — live on every device`))
   }
   return (
     <div className="flex items-center gap-3 border-b border-border py-3 last:border-0">
@@ -453,8 +630,8 @@ function BrandSlotEditor({
       <button
         type="button"
         onClick={() => {
-          setBrand(country, slot, null)
-          onSaved(`${label} reset to default`)
+          resetBrand(country, slot).then((err) =>
+            onSaved(err ? `⚠ reset failed: ${err}` : `${label} reset to default (history kept)`))
         }}
         className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted transition-colors hover:text-ink"
       >
@@ -464,20 +641,130 @@ function BrandSlotEditor({
   )
 }
 
+/* Country settings — live rows from country_settings, admin-editable.
+   GHL / M4U secrets are shown as set / not set only, never displayed. */
+interface CSRow {
+  country: 'MY' | 'ID'; currency: string; tax_name: string; tax_rate: number
+  default_language: string; phone_prefix: string; timezone: string
+  ghl_location_id: string | null; m4u_secret: string | null
+}
+function CountrySettingsCard({ c, onSaved }: { c: 'MY' | 'ID'; onSaved: (m: string) => void }) {
+  const [row, setRow] = useState<CSRow | null>(null)
+  const [edit, setEdit] = useState(false)
+  const [draft, setDraft] = useState<CSRow | null>(null)
+
+  useEffect(() => {
+    supabase?.from('country_settings').select('*').eq('country', c).maybeSingle()
+      .then(({ data }) => setRow(data as CSRow | null))
+  }, [c])
+
+  const save = async () => {
+    if (!supabase || !draft) return
+    const { error } = await supabase.from('country_settings').update({
+      currency: draft.currency, tax_name: draft.tax_name, tax_rate: draft.tax_rate,
+      default_language: draft.default_language, phone_prefix: draft.phone_prefix,
+      timezone: draft.timezone, updated_at: new Date().toISOString(),
+    }).eq('country', c)
+    if (error) { onSaved(`⚠ ${c} save failed: ${error.message}`); return }
+    setRow(draft); setEdit(false)
+    onSaved(`${c} settings saved — live for every agent`)
+  }
+
+  const inp = 'w-40 rounded-lg border border-border bg-surface px-2 py-1.5 text-right text-sm font-semibold outline-none focus:border-accent'
+  if (!row) return <Card className="p-5 text-center text-xs text-muted">Loading {c}…</Card>
+  const d = draft ?? row
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <p className="font-display text-sm font-extrabold">{c === 'MY' ? '🇲🇾 Malaysia' : '🇮🇩 Indonesia'}</p>
+        {!edit && (
+          <button type="button" onClick={() => { setDraft(row); setEdit(true) }}
+            className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted hover:border-accent/60 hover:text-ink">
+            Edit
+          </button>
+        )}
+      </div>
+      {([
+        ['Currency', 'currency', d.currency],
+        ['Tax name', 'tax_name', d.tax_name],
+        ['Tax rate %', 'tax_rate', String(Math.round(d.tax_rate * 10000) / 100)],
+        ['Default language', 'default_language', d.default_language],
+        ['Phone prefix', 'phone_prefix', d.phone_prefix],
+        ['Timezone', 'timezone', d.timezone],
+      ] as [string, keyof CSRow, string][]).map(([label, field, val]) => (
+        <div key={field} className="flex items-center justify-between border-b border-border py-2.5 text-sm">
+          <span className="text-muted">{label}</span>
+          {edit ? (
+            field === 'default_language' ? (
+              <select value={val} className={inp}
+                onChange={(e) => setDraft({ ...d, default_language: e.target.value })}>
+                <option value="en">en</option><option value="ms">ms (BM)</option><option value="id">id</option>
+              </select>
+            ) : (
+              <input value={val} className={inp}
+                onChange={(e) => setDraft({
+                  ...d,
+                  [field]: field === 'tax_rate' ? (Number(e.target.value) || 0) / 100 : e.target.value,
+                })} />
+            )
+          ) : (
+            <span className="font-semibold">{field === 'tax_rate' ? `${val}%` : val}</span>
+          )}
+        </div>
+      ))}
+      <div className="flex items-center justify-between border-b border-border py-2.5 text-sm">
+        <span className="text-muted">GHL account</span>
+        <span className="font-semibold">{row.ghl_location_id ? 'connected' : 'not set'}</span>
+      </div>
+      <div className="flex items-center justify-between py-2.5 text-sm">
+        <span className="text-muted">M4U webhook secret</span>
+        <span className="font-semibold">{row.m4u_secret ? 'set' : 'not set'}</span>
+      </div>
+      {edit && (
+        <div className="mt-3 flex gap-2">
+          <button type="button" onClick={save}
+            className="flex-1 cursor-pointer rounded-xl bg-accent py-2.5 text-xs font-bold text-on-accent hover:opacity-90">
+            Save {c}
+          </button>
+          <button type="button" onClick={() => { setDraft(null); setEdit(false) }}
+            className="cursor-pointer rounded-xl border border-border px-4 py-2.5 text-xs font-bold text-muted hover:text-ink">
+            Cancel
+          </button>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 type Section =
-  | 'dashboard' | 'people' | 'sales' | 'activity' | 'elite' | 'booths'
-  | 'caller' | 'content' | 'rewards' | 'settings' | 'challenge'
+  | 'dashboard' | 'people' | 'sales' | 'activity' | 'elite' | 'booths' | 'events' | 'certtpl' | 'kamalsesi'
+  | 'caller' | 'content' | 'rewards' | 'settings' | 'challenge' | 'talent' | 'growonb' | 'social' | 'atlas' | 'academy'
 type CallerTab =
   | 'overview' | 'leads' | 'pipelines' | 'projects' | 'fields'
   | 'import' | 'quotes' | 'bop' | 'reports' | 'audit'
 type Team = 'ALL' | 'MY' | 'ID'
+
+
+/* PostgREST silently caps any GET at 1000 rows — `.limit(5000)` does not lift it.
+   This bit us during the migration (multi-interest links resolved 1179/4102) and
+   again on this dashboard: 3,701 calls reported as 1,000. Page until short. */
+async function fetchAll<T>(build: (from: number, to: number) => PromiseLike<{ data: unknown }>, maxPages = 6): Promise<T[]> {
+  const out: T[] = []
+  for (let page = 0; page < maxPages; page++) {
+    const { data } = await build(page * 1000, page * 1000 + 999)
+    const rows = (data as T[]) ?? []
+    out.push(...rows)
+    if (rows.length < 1000) break
+  }
+  return out
+}
 
 const NAV: { group: string; items: { key: Section; icon: typeof Users; label: string; badge?: number }[] }[] = [
   { group: 'Overview', items: [{ key: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }] },
   {
     group: 'Business',
     items: [
-      { key: 'people', icon: Users, label: 'People & Roles', badge: 2 },
+      { key: 'people', icon: Users, label: 'People & Roles' },
       { key: 'sales', icon: TrendingUp, label: 'Sales Oversight' },
       { key: 'activity', icon: Activity, label: 'Activity Monitor' },
     ],
@@ -487,13 +774,21 @@ const NAV: { group: string; items: { key: Section; icon: typeof Users; label: st
     items: [
       { key: 'elite', icon: Swords, label: 'Elite & Captains' },
       { key: 'booths', icon: Tent, label: 'Booths' },
+      { key: 'events', icon: Ticket, label: 'Events' },
+      { key: 'certtpl', icon: Award, label: 'Certificate Templates' },
+      { key: 'kamalsesi', icon: Mic, label: 'Kamal AG Sessions' },
     ],
   },
   {
     group: 'Functions',
     items: [
       { key: 'challenge', icon: Rocket, label: '30-Day Challenge' },
-      { key: 'caller', icon: PhoneCall, label: 'Caller · M4U', badge: 3 },
+      { key: 'caller', icon: PhoneCall, label: 'Caller · M4U' },
+      { key: 'talent', icon: Compass, label: 'Talent Compass' },
+      { key: 'growonb', icon: GraduationCap, label: 'Grow · Onboarding' },
+      { key: 'social', icon: Camera, label: 'Social Coaching' },
+      { key: 'atlas', icon: Library, label: 'ATLAS Library' },
+      { key: 'academy', icon: Compass, label: 'Grow · AG Academy' },
       { key: 'content', icon: FolderCog, label: 'App Content' },
       { key: 'rewards', icon: Gift, label: 'Rewards' },
     ],
@@ -501,7 +796,7 @@ const NAV: { group: string; items: { key: Section; icon: typeof Users; label: st
   { group: 'System', items: [{ key: 'settings', icon: Globe2, label: 'Country Settings' }] },
 ]
 
-/* ---------------- mock data ---------------- */
+/* ---------------- DEMO-ONLY fixtures (see the guard at the caller section) ---------------- */
 interface AgentRow {
   id: string; name: string; phone: string; email: string; team: 'MY' | 'ID'
   status: 'pending' | 'active' | 'paused'; role: string; rank: string; elite?: boolean; projects: string[]
@@ -513,33 +808,6 @@ const SEED_AGENTS: AgentRow[] = [
   { id: 'a4', name: 'Dewi Anggraini', phone: '+62 813-9988-776', email: 'dewi@iqi.id', team: 'ID', status: 'active', role: 'leader', rank: 'TL', projects: ['Vividz Grand', 'Podomoro Park'] },
   { id: 'a5', name: 'Mei Ling Wong', phone: '+60 12-334 5566', email: 'meiling@iqi.my', team: 'MY', status: 'pending', role: 'agent', rank: 'REN', projects: [] },
   { id: 'a6', name: 'Rizky Pratama', phone: '+62 821-1122-334', email: 'rizky@iqi.id', team: 'ID', status: 'pending', role: 'agent', rank: 'REN', projects: [] },
-]
-interface Deal {
-  id: string; client: string; project: string; price: string; comm: string
-  stage: string; agent: string; team: 'MY' | 'ID'
-}
-const SEED_DEALS: Deal[] = [
-  { id: 'd1', client: 'Hafiz Omar', project: 'EXSIM Residensi', price: 'RM 620,000', comm: 'RM 15,500', stage: 'Booking', agent: 'Aisyah', team: 'MY' },
-  { id: 'd2', client: 'Sarah Lim', project: 'EXSIM Residensi', price: 'RM 585,000', comm: 'RM 14,625', stage: 'Closed', agent: 'Aisyah', team: 'MY' },
-  { id: 'd3', client: 'Encik Rahman', project: 'Erinaz Suites', price: 'RM 350,000', comm: 'RM 7,000', stage: 'Loan Approval', agent: 'Faizal', team: 'MY' },
-  { id: 'd4', client: 'Sari Wulandari', project: 'Vividz Grand', price: 'Rp 2.4 M', comm: 'Rp 48 jt', stage: 'Appointment', agent: 'Dewi', team: 'ID' },
-  { id: 'd5', client: 'Pak Agus', project: 'Podomoro Park', price: 'Rp 1.8 M', comm: 'Rp 36 jt', stage: 'Follow-Up', agent: 'Dewi', team: 'ID' },
-  { id: 'd6', client: 'Michelle Yeo', project: 'Erinaz Suites', price: 'RM 410,000', comm: 'RM 8,200', stage: 'Calling', agent: 'Faizal', team: 'MY' },
-]
-const STAGES = ['Calling', 'Follow-Up', 'Appointment', 'Booking', 'Loan Approval', 'Closed']
-const STAGE_COUNTS = [24, 18, 12, 9, 6, 38]
-const ACTIVITY = [
-  { name: 'Aisyah Rahman', team: 'MY' as const, pct: 88, done: 7, total: 8, points: 120 },
-  { name: 'Faizal Hassan', team: 'MY' as const, pct: 75, done: 6, total: 8, points: 95 },
-  { name: 'Dewi Anggraini', team: 'ID' as const, pct: 63, done: 5, total: 8, points: 80 },
-  { name: 'Budi Santoso', team: 'ID' as const, pct: 25, done: 2, total: 8, points: 20 },
-  { name: 'Mei Ling Wong', team: 'MY' as const, pct: 0, done: 0, total: 6, points: 0 },
-]
-const PODS = [
-  { name: 'ALPHA', captain: 'Aisyah', team: 'MY' as const, members: 5, closings: 8, poolIn: 'RM 9,300' },
-  { name: 'BRAVO', captain: 'Faizal', team: 'MY' as const, members: 4, closings: 5, poolIn: 'RM 5,810' },
-  { name: 'ZULU', captain: 'Rahim', team: 'MY' as const, members: 6, closings: 3, poolIn: 'RM 3,350' },
-  { name: 'GARUDA', captain: 'Dewi', team: 'ID' as const, members: 5, closings: 4, poolIn: 'Rp 96 jt' },
 ]
 interface LeadRow {
   id: string; name: string; phone: string; project: string; team: 'MY' | 'ID'
@@ -561,20 +829,302 @@ const PIVOT: Record<string, number[]> = {
   'Not Interested': [12, 9, 14, 6],
   'Wrong Number': [2, 4, 1, 3],
 }
-const REWARDS = [
-  { title: 'Sabah Trip 2026', tier: 'Gold', team: 'MY' as const, active: true, target: 'RM 3.0M by 31 Dec' },
-  { title: 'Cash & Car Challenge', tier: 'Platinum', team: 'MY' as const, active: true, target: 'RM 5.0M by 31 Dec' },
-  { title: 'Bali Trip Warriors', tier: 'Gold', team: 'ID' as const, active: false, target: 'Rp 10 M by 31 Dec' },
-]
 
 export default function Admin() {
   const nav = useNavigate()
-  const { user } = useApp()
+  const { user, theme, toggleTheme } = useApp()
+  /* The AG crest in the sidebar comes from the Brand Studio slot, so replacing
+     the logo there replaces it here too — same source as Login and the public
+     certificate/event pages. Falls back to the icon if no asset is set. */
+  const shield = useBrand('GLOBAL', 'shield')
   const [section, setSection] = useState<Section>('dashboard')
-  const [chTab, setChTab] = useState<'progress' | 'curriculum' | 'coaches' | 'reports'>('progress')
-  const [callerTab, setCallerTab] = useState<CallerTab>('overview')
+  /* Live reward campaigns. The old table rendered a hardcoded array, so nobody
+     could publish a real one — the catalogue on /grow was always fiction. */
+  const [rw, setRw] = useState<{ id: string; country: string; title: string; tier: string | null
+    category: string | null; target_label: string | null; active: boolean; poster_path: string | null }[]>([])
+  const [rwForm, setRwForm] = useState({ title: '', tier: '', category: '', target_label: '', country: 'MY' })
+  const [rwPoster, setRwPoster] = useState<File | null>(null)
+  const [rwBusy, setRwBusy] = useState(false)
+
+  /* People & Roles, on live data. The table used to render SEED_AGENTS and the
+     approve/pause buttons only mutated local state — a reload undid everything.
+     Challenge roles come from user_roles via fn_set_challenge_role, which is
+     also where the lockout guard lives (you cannot strip your own super_admin). */
+  interface Person {
+    id: string; name: string; email: string | null; phone: string | null
+    country: string | null; role: string; status: string; is_elite?: boolean
+    career_rank: string | null
+  }
+  const [people, setPeople] = useState<Person[]>([])
+  /* live sidebar badge — real pending registrations, not a hardcoded number */
+  const [pendingCount, setPendingCount] = useState(0)
+  useEffect(() => {
+    if (!supabase) return
+    supabase.from('profiles').select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .then(({ count }) => setPendingCount(count ?? 0))
+  }, [section])
+  const [roles, setRoles] = useState<{ user_id: string; role: string }[]>([])
+  const [captainIds, setCaptainIds] = useState<Set<string>>(new Set())
+  const [openWarrior, setOpenWarrior] = useState<Person | null>(null)
+  const [pplBusy, setPplBusy] = useState(false)
+  const [pplQ, setPplQ] = useState('')
+  const loadPeople = useCallback(async () => {
+    if (!supabase) return
+    const [{ data: p }, { data: r }, { data: pd }] = await Promise.all([
+      supabase.from('profiles').select('id,name,email,phone,country,role,status,is_elite,career_rank').order('name'),
+      supabase.from('user_roles').select('user_id,role'),
+      supabase.from('pods').select('captain_id'),
+    ])
+    setPeople((p as Person[]) ?? [])
+    setRoles((r as { user_id: string; role: string }[]) ?? [])
+    setCaptainIds(new Set(((pd as { captain_id: string }[]) ?? []).map((x) => x.captain_id)))
+  }, [])
+  useEffect(() => { if (section === 'people') loadPeople() }, [section, loadPeople])
+  const pplSave = async (fn: () => Promise<{ error: unknown }>, ok: string) => {
+    setPplBusy(true)
+    const { error } = await fn()
+    setPplBusy(false)
+    if (error) say('⚠ ' + (error as { message?: string }).message)
+    else { say(ok); loadPeople() }
+  }
+  const hasRole = (id: string, r: string) => roles.some((x) => x.user_id === id && x.role === r)
+
+  /* Elite & Captains, live. fn_set_elite refuses to demote a serving Captain and
+     fn_create_pod refuses a non-elite captain, so the spec rules hold in the
+     database rather than in button logic. */
+  interface PodRow { id: string; name: string; captain_id: string; country: string }
+  const [livePods, setLivePods] = useState<PodRow[]>([])
+  const [podMembers, setPodMembers] = useState<{ pod_id: string; agent_id: string }[]>([])
+  const [eliteQ, setEliteQ] = useState('')
+  const [podForm, setPodForm] = useState({ name: '', captain: '', country: 'MY' })
+  const loadElite = useCallback(async () => {
+    if (!supabase) return
+    const [{ data: p }, { data: m }] = await Promise.all([
+      supabase.from('pods').select('id,name,captain_id,country').order('name'),
+      supabase.from('pod_members').select('pod_id,agent_id'),
+    ])
+    setLivePods((p as PodRow[]) ?? [])
+    setPodMembers((m as { pod_id: string; agent_id: string }[]) ?? [])
+  }, [])
+  useEffect(() => { if (section === 'elite') { loadElite(); loadPeople() } }, [section, loadElite, loadPeople])
+
+  /* Dashboard on live aggregates. The hero used to show invented money
+     ("RM 12.4M pipeline") and the tiles fixed numbers; anything without a real
+     source is now simply absent rather than made up. */
+  interface Dash {
+    warriors: number; my: number; id: number; pendingRegs: number
+    queue: number; triage: number; ghlPending: number; lastLeadAt: string | null
+    calls30: number; callsToday: number; activeToday: number
+    appts30: number; pods: number; talentReports: number
+    byDispo: { label: string; value: number }[]
+    topAgents: { name: string; value: number }[]
+    todayDispo: { label: string; value: number }[]
+  }
+  /* the global country switcher — declared before loadDash, which depends on it */
   const [team, setTeam] = useState<Team>('ALL')
-  const [agents, setAgents] = useState(SEED_AGENTS)
+  const [dash, setDash] = useState<Dash | null>(null)
+  const loadDash = useCallback(async () => {
+    if (!supabase) return
+    const since30 = new Date(Date.now() - 30 * 864e5).toISOString()
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const [prof, Lraw, Araw, podsQ, wins, reps] = await Promise.all([
+      supabase.from('profiles').select('id,country,status'),
+      fetchAll<{ status: string; property_id: number | null; ghl_sync_pending: boolean; received_at: string | null; country: string }>(
+        (from, to) => supabase!.from('m4u_leads').select('status,property_id,ghl_sync_pending,received_at,country')
+          .order('received_at', { ascending: false, nullsFirst: false }).range(from, to)),
+      fetchAll<{ agent_id: string; disposition: string; called_at: string }>(
+        (from, to) => supabase!.from('m4u_attempts').select('agent_id,disposition,called_at')
+          .gte('called_at', since30).order('called_at', { ascending: false }).range(from, to)),
+      supabase.from('pods').select('id,country'),
+      supabase.from('m4u_dispositions').select('key,is_win,active'),
+      supabase.from('talent_attempts').select('id,status'),
+    ])
+    const Pall = (prof.data ?? []) as { id: string; country: string | null; status: string }[]
+    /* the All/MY/ID switcher scopes the whole dashboard */
+    const inT = (c: string | null | undefined) => team === 'ALL' || c === team
+    const countryOf = Object.fromEntries(Pall.map((x) => [x.id, x.country]))
+    const P = Pall
+    const L = Lraw.filter((x) => inT(x.country))
+    const A = Araw.filter((x) => inT(countryOf[x.agent_id]))
+    const winKeys = new Set(((wins.data ?? []) as { key: string; is_win: boolean; active: boolean }[])
+      .filter((d) => d.is_win && d.active).map((d) => d.key))
+    const nameOf = (id: string) => P.find((x) => x.id === id)
+    const todayA = A.filter((a) => new Date(a.called_at) >= today)
+    const count = (arr: { disposition: string }[]) => {
+      const m: Record<string, number> = {}
+      arr.forEach((a) => { m[a.disposition] = (m[a.disposition] ?? 0) + 1 })
+      return Object.entries(m).map(([label, value]) => ({ label, value }))
+        .sort((x, y) => y.value - x.value)
+    }
+    const byAgent: Record<string, number> = {}
+    A.forEach((a) => { byAgent[a.agent_id] = (byAgent[a.agent_id] ?? 0) + 1 })
+    setDash({
+      warriors: P.filter((x) => x.status === 'active' && inT(x.country)).length,
+      my: P.filter((x) => x.country === 'MY' && x.status === 'active').length,
+      id: P.filter((x) => x.country === 'ID' && x.status === 'active').length,
+      pendingRegs: P.filter((x) => x.status === 'pending' && inT(x.country)).length,
+      queue: L.filter((x) => x.status === 'pool').length,
+      triage: L.filter((x) => !x.property_id).length,
+      ghlPending: L.filter((x) => x.ghl_sync_pending).length,
+      lastLeadAt: L[0]?.received_at ?? null,
+      calls30: A.length,
+      callsToday: todayA.length,
+      activeToday: new Set(todayA.map((a) => a.agent_id)).size,
+      appts30: A.filter((a) => winKeys.has(a.disposition)).length,
+      pods: ((podsQ.data ?? []) as { id: string; country: string }[]).filter((p) => inT(p.country)).length,
+      talentReports: ((reps.data ?? []) as { status: string }[]).filter((r) => r.status === 'reported').length,
+      byDispo: count(A).slice(0, 6),
+      topAgents: Object.entries(byAgent).sort((x, y) => y[1] - x[1]).slice(0, 5)
+        .map(([id, value]) => ({ name: (nameOf(id) as unknown as { id: string } & { country: string | null }) ? (people.find((pp) => pp.id === id)?.name ?? 'Warrior') : 'Warrior', value })),
+      todayDispo: count(todayA).slice(0, 5),
+    })
+  }, [people, team])
+  useEffect(() => { if (section === 'dashboard') { loadDash(); loadPeople() } }, [section, loadDash, loadPeople])
+
+  /* Announcements + Directory (App Content). A broadcast fans out through
+     fn_announce into every warrior's existing notification bell; the history
+     table records who sent what to how many. */
+  interface Announcement { id: string; country: string; title: string; body: string
+    recipients: number; created_at: string }
+  interface DirEntry { id: string; country: string; category: string; name: string
+    role: string | null; phone: string | null; email: string | null; sort: number; active: boolean }
+  const [anns, setAnns] = useState<Announcement[]>([])
+  const [dirs, setDirs] = useState<DirEntry[]>([])
+  const [annForm, setAnnForm] = useState({ title: '', body: '', country: 'ALL', link: '' })
+  const [dirForm, setDirForm] = useState({ name: '', role: '', phone: '', email: '',
+    category: 'Leadership', country: 'ALL' })
+  const [cBusy, setCBusy] = useState(false)
+  const loadContent = useCallback(async () => {
+    if (!supabase) return
+    const [{ data: a }, { data: d }] = await Promise.all([
+      supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(10),
+      supabase.from('directory_entries').select('*').order('category').order('sort').order('name'),
+    ])
+    setAnns((a as Announcement[]) ?? [])
+    setDirs((d as DirEntry[]) ?? [])
+  }, [])
+  useEffect(() => { if (section === 'content') loadContent() }, [section, loadContent])
+  const cSave = async (fn: () => Promise<{ error: unknown }>, ok: string) => {
+    setCBusy(true)
+    const { error } = await fn()
+    setCBusy(false)
+    if (error) say('⚠ ' + (error as { message?: string }).message)
+    else { say(ok); loadContent() }
+  }
+
+  /* Activity Monitor: counts only, by design. The RPC never returns task labels
+     or reasons — a warrior's planner stays private; leadership sees the numbers. */
+  interface ActRow { user_id: string; name: string; country: string | null
+    planned: number; done: number; notdone: number; calls_today: number }
+  const [act, setAct] = useState<ActRow[] | null>(null)
+  useEffect(() => {
+    if (section !== 'activity' || !supabase) return
+    ;(async () => {
+      const { data, error } = await supabase.rpc('timebox_admin_today')
+      if (error) { say('⚠ ' + error.message); return }
+      setAct((data as ActRow[]) ?? [])
+    })()
+  }, [section])
+
+  /* Booths, live. Create with a date range and AM/PM shifts; the roster count
+     comes from booth_signups. Warriors sign themselves up (policy allows it);
+     the agent-side page can follow after launch. */
+  interface Booth { id: string; country: string; title: string; location: string | null
+    date_start: string | null; date_end: string | null; shifts: string[] | null }
+  const [booths, setBooths] = useState<Booth[]>([])
+  const [signups, setSignups] = useState<{ booth_id: string; agent_id: string; on_date: string; shift: string }[]>([])
+  const [boothForm, setBoothForm] = useState({ title: '', location: '', country: 'MY',
+    date_start: '', date_end: '', am: true, pm: true })
+  const loadBooths = useCallback(async () => {
+    if (!supabase) return
+    const [{ data: b }, { data: g }] = await Promise.all([
+      supabase.from('booths').select('*').order('date_start', { ascending: false, nullsFirst: false }),
+      supabase.from('booth_signups').select('booth_id,agent_id,on_date,shift'),
+    ])
+    setBooths((b as Booth[]) ?? [])
+    setSignups((g as typeof signups) ?? [])
+  }, [])
+  useEffect(() => { if (section === 'booths') loadBooths() }, [section, loadBooths])
+
+  /* Sales Oversight: the challenge CRM is the only real deal pipeline. Before
+     the cohort starts it is empty — shown as empty, not decorated. */
+  const CH_STAGES = ['NEW','CONTACTED','ENGAGED','QUALIFIED','APPOINTMENT_SET',
+    'PRESENTATION_OR_VIEWING','FOLLOW_UP','NEGOTIATION','CLOSING_PROCESS',
+    'CLOSED_WON','CLOSED_LOST','NURTURE','DISQUALIFIED'] as const
+  const [chStages, setChStages] = useState<Record<string, number> | null>(null)
+  const [chClosings, setChClosings] = useState<{ total: number; verified: number } | null>(null)
+  useEffect(() => {
+    if (section !== 'sales' || !supabase) return
+    ;(async () => {
+      const [{ data: l }, { data: c }] = await Promise.all([
+        supabase.from('ch_leads').select('stage'),
+        supabase.from('ch_closings').select('id,verified_by'),
+      ])
+      const m: Record<string, number> = {}
+      ;((l ?? []) as { stage: string }[]).forEach((x) => { m[x.stage] = (m[x.stage] ?? 0) + 1 })
+      setChStages(m)
+      const rows = (c ?? []) as { id: string; verified_by: string | null }[]
+      setChClosings({ total: rows.length, verified: rows.filter((x) => x.verified_by).length })
+    })()
+  }, [section])
+  /* Kamal's model (2026-08-05) — THREE systems, never mixed (standing order):
+       1. CAREER rank: REN → L → TL → HOT → TM → VP (profiles.career_rank).
+          Everyone defaults to REN; admin promotes with confirmation.
+       2. TIM ELIT position: Captain — held regardless of career rank, managed
+          in Elite & Captains; shown here as a read-only badge.
+       3. LEADERSHIP positions: Elite Coach / Master Mentor / Super Admin —
+          stackable, anyone can hold them alongside anything else. Toggles, but
+          every change confirms first (the accidental-press fix stays). */
+  /* Icons everywhere (Kamal 2026-08-05): every rank and position has one, and a
+     person holding several shows ALL of them as badges beside their name.
+     Career icons follow the ladder metals (silver REN -> red VP). */
+  const CAREER_RANKS = [
+    { v: 'REN', icon: '⚪' }, { v: 'L', icon: '🟤' }, { v: 'TL', icon: '🔵' },
+    { v: 'HOT', icon: '🟡' }, { v: 'TM', icon: '🟣' }, { v: 'VP', icon: '🔴' },
+  ]
+  const POSITIONS = [
+    { v: 'elite_coach', label: 'Elite Coach', icon: '🛡️' },
+    { v: 'master_mentor', label: 'Master Mentor', icon: '🎓' },
+    { v: 'super_admin', label: 'Super Admin', icon: '🔑' },
+  ]
+  const setCareer = async (p: Person, rank: string) => {
+    if (rank === (p.career_rank ?? 'REN')) return
+    if (!confirm(`Set ${p.name}'s career rank to ${rank}?`)) { loadPeople(); return }
+    await pplSave(async () => await supabase!.from('profiles')
+      .update({ career_rank: rank }).eq('id', p.id), `${p.name} → ${rank}`)
+  }
+  const togglePosition = async (p: Person, role: string, label: string) => {
+    const has = hasRole(p.id, role)
+    const warning = role === 'super_admin' && !has
+      ? `⚠ Grant SUPER ADMIN to ${p.name}?\n\nThey will control roles, approvals and every admin console.`
+      : `${has ? 'Remove' : 'Grant'} ${label} ${has ? 'from' : 'to'} ${p.name}?`
+    if (!confirm(warning)) return
+    await pplSave(async () => await supabase!.rpc('fn_set_challenge_role',
+      { p_user: p.id, p_role: role, p_grant: !has }),
+      `${p.name}: ${label} ${has ? 'removed' : 'granted'}`)
+  }
+
+  const loadRewards = useCallback(async () => {
+    if (!supabase) return
+    const { data } = await supabase.from('rewards').select('*').order('country').order('sort')
+    setRw((data as typeof rw) ?? [])
+  }, [])
+  useEffect(() => { if (section === 'rewards') loadRewards() }, [section, loadRewards])
+  const rwSave = async (fn: () => Promise<{ error: unknown }>, ok: string) => {
+    setRwBusy(true)
+    const { error } = await fn()
+    setRwBusy(false)
+    if (error) say('⚠ ' + (error as { message?: string }).message)
+    else { say(ok); loadRewards() }
+  }
+  const [chTab, setChTab] = useState<'health' | 'progress' | 'enrolment' | 'curriculum' | 'coaches' | 'reports' | 'governance'>('health')
+  const [callerTab, setCallerTab] = useState<CallerTab>('overview')
+  /* DEMO-ONLY fixtures. Rendered exclusively inside the `section === 'caller' &&
+     !(supabaseReady && real id)` branch, behind a visible DEMO PREVIEW banner.
+     They are never reachable from a production account. People & Roles, the
+     caller console and every challenge surface read live tables only. */
+  const [agents] = useState(SEED_AGENTS)
   const [leads, setLeads] = useState(SEED_LEADS)
   const [toast, setToast] = useState('')
   const [unread, setUnread] = useState(0)
@@ -599,28 +1149,11 @@ export default function Admin() {
 
   const fAgents = inTeam(agents)
   const fLeads = inTeam(leads)
-  const fDeals = inTeam(SEED_DEALS)
-  const fActivity = inTeam(ACTIVITY)
-  const fPods = inTeam(PODS)
-  const pending = fAgents.filter((a) => a.status === 'pending')
+  // demo derivations kept only where a demo section still uses them
 
-  const kpi = useMemo(() => ({
-    agents: fAgents.length,
-    my: agents.filter((a) => a.team === 'MY').length,
-    id: agents.filter((a) => a.team === 'ID').length,
-    activeToday: fActivity.filter((a) => a.pct > 0).length,
-    closings: fDeals.filter((d) => d.stage === 'Closed').length,
-    pipeline: fDeals.filter((d) => d.stage !== 'Closed').length,
-    queue: fLeads.filter((l) => l.status === 'pool').length,
-    pods: fPods.length,
-  }), [fAgents, fActivity, fDeals, fLeads, fPods, agents])
 
   if (!user) return null
 
-  const setAgentStatus = (id: string, status: AgentRow['status'], msg: string) => {
-    setAgents((as) => as.map((a) => (a.id === id ? { ...a, status } : a)))
-    say(msg)
-  }
   const leadAction = (id: string, patch: Partial<LeadRow>, msg: string) => {
     setLeads((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
     say(msg)
@@ -631,9 +1164,13 @@ export default function Admin() {
       {/* ---------------- sidebar ---------------- */}
       <aside className="adm-side flex w-56 shrink-0 flex-col border-r border-border">
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-4">
-          <div className="adm-crest flex h-10 w-10 items-center justify-center rounded-xl text-[#1a1407]">
-            <Shield size={19} />
-          </div>
+          {shield ? (
+            <img src={shield} alt="AG" className="adm-mark h-11 w-11 shrink-0 object-contain" />
+          ) : (
+            <div className="adm-crest flex h-10 w-10 items-center justify-center rounded-xl text-[#1a1407]">
+              <Shield size={19} />
+            </div>
+          )}
           <div className="min-w-0">
             <p className="font-display text-sm font-extrabold leading-tight">Command HQ</p>
             <p className="text-[10px] tracking-wide text-muted">AG WARRIORS · ADMIN</p>
@@ -655,8 +1192,8 @@ export default function Admin() {
                 >
                   <it.icon size={15} className="shrink-0" />
                   <span className="flex-1">{it.label}</span>
-                  {!!it.badge && (
-                    <span className="adm-pulse flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-extrabold text-white">{it.badge}</span>
+                  {it.key === 'people' && pendingCount > 0 && (
+                    <span className="adm-pulse flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-danger px-1 text-[9px] font-extrabold text-white">{pendingCount}</span>
                   )}
                 </button>
               ))}
@@ -693,6 +1230,10 @@ export default function Admin() {
               </button>
             ))}
           </div>
+          <button type="button" onClick={toggleTheme} aria-label="Toggle light/dark"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted transition-colors duration-200 hover:text-ink">
+            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <Link to="/notifications" aria-label="Notifications"
             className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink">
             <BellRing size={16} />
@@ -717,20 +1258,20 @@ export default function Admin() {
                   Salam, {user.name.split(' ')[0]} 👋
                 </h2>
                 <p className="mt-1 text-xs text-[#c9c2a8]">
-                  {kpi.agents} warriors across 🇲🇾 {kpi.my} + 🇮🇩 {kpi.id} · pipeline moving
+                  {dash?.warriors ?? '—'} warriors across MY {dash?.my ?? '—'} + ID {dash?.id ?? '—'}
                 </p>
                 <div className="relative mt-4 flex flex-wrap gap-6">
                   <div>
-                    <p className="adm-gold font-display text-3xl font-extrabold">RM 12.4M</p>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Pipeline value</p>
+                    <p className="adm-gold font-display text-3xl font-extrabold">{dash?.calls30?.toLocaleString() ?? '—'}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Calls · 30 days</p>
                   </div>
                   <div>
-                    <p className="adm-gold font-display text-3xl font-extrabold">RM 894k</p>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Commission this month</p>
+                    <p className="adm-gold font-display text-3xl font-extrabold">{dash?.appts30 ?? '—'}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Appointments · 30 days</p>
                   </div>
                   <div>
-                    <p className="font-display text-3xl font-extrabold text-white">{kpi.closings + 37}</p>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Closings this month</p>
+                    <p className="font-display text-3xl font-extrabold text-white">{dash?.talentReports ?? '—'}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-[#c9c2a8]">Talent profiles issued</p>
                   </div>
                 </div>
               </div>
@@ -738,12 +1279,12 @@ export default function Admin() {
               {/* KPI cards with icon chips */}
               <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                 {[
-                  { v: kpi.agents, l: 'Warriors', sub: `🇲🇾 ${kpi.my} · 🇮🇩 ${kpi.id}`, icon: Users, tint: '#d4ac4a' },
-                  { v: kpi.activeToday, l: 'Active today', icon: Zap, tint: '#22c55e' },
-                  { v: kpi.queue, l: 'Caller queue', icon: PhoneCall, tint: '#3b82f6' },
-                  { v: kpi.pods, l: 'Elite pods', icon: Swords, tint: '#8b5cf6' },
-                  { v: 18, l: 'Booked (mo)', icon: Handshake, tint: '#10b981' },
-                  { v: pending.length, l: 'Pending regs', icon: UserPlus, tint: '#f59e0b', warn: pending.length > 0 },
+                  { v: dash?.warriors ?? 0, l: 'Warriors', sub: `MY ${dash?.my ?? 0} · ID ${dash?.id ?? 0}`, icon: Users, tint: '#d4ac4a' },
+                  { v: dash?.activeToday ?? 0, l: 'Callers active today', icon: Zap, tint: '#22c55e' },
+                  { v: dash?.queue ?? 0, l: 'Caller queue', icon: PhoneCall, tint: '#3b82f6' },
+                  { v: dash?.pods ?? 0, l: 'Elite pods', icon: Swords, tint: '#8b5cf6' },
+                  { v: dash?.appts30 ?? 0, l: 'Appointments (30d)', icon: Handshake, tint: '#10b981' },
+                  { v: dash?.pendingRegs ?? 0, l: 'Pending regs', icon: UserPlus, tint: '#f59e0b', warn: (dash?.pendingRegs ?? 0) > 0 },
                 ].map((k) => (
                   <div key={k.l} className={clsx('adm-kpi p-4', k.warn && 'border-warning/50')}>
                     <div className="mb-2.5 flex items-center justify-between">
@@ -762,12 +1303,12 @@ export default function Admin() {
               {/* needs-attention strip */}
               <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
                 {[
-                  { l: 'Pending registrations', v: pending.length, s: 'people' as Section, icon: UserPlus, tint: '#f59e0b' },
-                  { l: 'Deals stuck > 7 days', v: 5, s: 'sales' as Section, icon: Timer, tint: '#ef4444' },
-                  { l: 'Agents inactive 3d+', v: 4, s: 'activity' as Section, icon: Flame, tint: '#f97316' },
-                  { l: 'Caller: triage leads', v: 1, s: 'caller' as Section, icon: PhoneCall, tint: '#3b82f6' },
-                  { l: 'Caller: GHL sync', v: 2, s: 'caller' as Section, icon: BellRing, tint: '#8b5cf6' },
-                  { l: 'Reward requests', v: 3, s: 'rewards' as Section, icon: Gift, tint: '#ec4899' },
+                  { l: 'Pending registrations', v: dash?.pendingRegs ?? 0, s: 'people' as Section, icon: UserPlus, tint: '#f59e0b' },
+                  { l: 'Triage leads (no project)', v: dash?.triage ?? 0, s: 'caller' as Section, icon: PhoneCall, tint: '#3b82f6' },
+                  { l: 'GHL sync pending', v: dash?.ghlPending ?? 0, s: 'caller' as Section, icon: BellRing, tint: '#8b5cf6' },
+                  { l: 'Hours since last lead', v: dash?.lastLeadAt ? Math.round((Date.now() - +new Date(dash.lastLeadAt)) / 36e5) : 0, s: 'caller' as Section, icon: Timer, tint: (dash?.lastLeadAt && Date.now() - +new Date(dash.lastLeadAt) > 12 * 36e5) ? '#ef4444' : '#22c55e' },
+                  { l: 'Calls today', v: dash?.callsToday ?? 0, s: 'caller' as Section, icon: Flame, tint: '#f97316' },
+                  { l: 'Talent profiles', v: dash?.talentReports ?? 0, s: 'talent' as Section, icon: Gift, tint: '#ec4899' },
                 ].map((a) => (
                   <button
                     key={a.l}
@@ -790,64 +1331,83 @@ export default function Admin() {
               </div>
 
               <div className="grid gap-4 xl:grid-cols-3">
-                {/* Sales funnel — stepped */}
+                {/* Caller outcomes, 30 days */}
                 <Card className="p-5">
-                  <p className="mb-4 font-display text-sm font-extrabold">Sales funnel — AG Playbook</p>
-                  {STAGES.map((s, i) => {
-                    const max = Math.max(...STAGE_COUNTS)
-                    const width = 55 + (STAGE_COUNTS[i] / max) * 45
+                  <p className="mb-4 font-display text-sm font-extrabold">Caller outcomes — 30 days</p>
+                  {(dash?.byDispo ?? []).length === 0 && (
+                    <p className="py-6 text-center text-xs text-muted">No calls in the last 30 days.</p>
+                  )}
+                  {(dash?.byDispo ?? []).map((d, i) => {
+                    const max = Math.max(1, ...(dash?.byDispo ?? []).map((x) => x.value))
                     const hues = ['#3b82f6', '#6366f1', '#8b5cf6', '#d4ac4a', '#f59e0b', '#22c55e']
                     return (
-                      <div
-                        key={s}
-                        className="adm-funnel-step"
-                        style={{ width: `${width}%`, background: `linear-gradient(90deg, ${hues[i]}cc, ${hues[i]})` }}
-                      >
-                        <span>{s}</span>
-                        <span>{STAGE_COUNTS[i]}</span>
+                      <div key={d.label} className="adm-funnel-step"
+                        style={{ width: `${55 + (d.value / max) * 45}%`,
+                                 background: `linear-gradient(90deg, ${hues[i % hues.length]}cc, ${hues[i % hues.length]})` }}>
+                        <span>{d.label}</span>
+                        <span>{d.value}</span>
                       </div>
                     )
                   })}
-                  <p className="mt-3 text-center text-[11px] text-muted">Calling → Closing · conversion 26%</p>
                 </Card>
-                {/* Team activity */}
+
+                {/* Top callers */}
                 <Card className="p-5">
-                  <p className="mb-4 font-display text-sm font-extrabold">Team activity today</p>
-                  {fActivity.slice(0, 5).map((a) => (
-                    <div key={a.name} className="mb-3.5">
-                      <div className="mb-1 flex items-center justify-between text-xs">
-                        <span className="font-semibold">{a.team === 'MY' ? '🇲🇾' : '🇮🇩'} {a.name}</span>
-                        <span className="text-muted">{a.pct}% · ⭐{a.points}</span>
+                  <p className="mb-4 font-display text-sm font-extrabold">Top callers — 30 days</p>
+                  {(dash?.topAgents ?? []).length === 0 && (
+                    <p className="py-6 text-center text-xs text-muted">No calls yet.</p>
+                  )}
+                  {(dash?.topAgents ?? []).map((a) => {
+                    const max = Math.max(1, ...(dash?.topAgents ?? []).map((x) => x.value))
+                    const pct = Math.round((a.value / max) * 100)
+                    return (
+                      <div key={a.name} className="mb-3.5">
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="font-semibold">{a.name}</span>
+                          <span className="text-muted">{a.value} calls</span>
+                        </div>
+                        <div className="adm-track">
+                          <div className={clsx('adm-fill', pct >= 60 && 'adm-fill--green')} style={{ width: `${Math.max(pct, 3)}%` }} />
+                        </div>
                       </div>
-                      <div className="adm-track">
-                        <div
-                          className={clsx('adm-fill', a.pct >= 60 ? 'adm-fill--green' : a.pct > 0 ? '' : 'adm-fill--red')}
-                          style={{ width: `${Math.max(a.pct, 3)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => setSection('activity')} className="mt-1 cursor-pointer text-xs font-bold text-accent">View all →</button>
+                    )
+                  })}
+                  <button type="button" onClick={() => setSection('activity')} className="mt-1 cursor-pointer text-xs font-bold text-accent">Open Activity Monitor →</button>
                 </Card>
-                {/* Caller snapshot with donut */}
+
+                {/* Today's calls donut, computed from real dispositions */}
                 <Card className="p-5">
                   <p className="mb-4 font-display text-sm font-extrabold">📞 Caller today</p>
-                  <div className="mb-4 flex items-center gap-5">
-                    <div
-                      className="adm-donut h-28 w-28 shrink-0"
-                      style={{ background: 'conic-gradient(#22c55e 0 9%, #3b82f6 9% 51%, #d4ac4a 51% 64%, #ef4444 64% 84%, #6b7488 84% 100%)' }}
-                    >
-                      <div className="adm-donut-label">
-                        <span className="font-display text-lg font-extrabold">214</span>
-                        <span className="text-[9px] font-semibold uppercase text-muted">calls</span>
+                  {(() => {
+                    const rows = dash?.todayDispo ?? []
+                    const totalToday = rows.reduce((t, r) => t + r.value, 0)
+                    if (totalToday === 0) return (
+                      <p className="py-6 text-center text-xs text-muted">No calls yet today.</p>
+                    )
+                    const hues = ['#22c55e', '#3b82f6', '#d4ac4a', '#ef4444', '#6b7488']
+                    let acc = 0
+                    const segs = rows.map((r, i) => {
+                      const from = (acc / totalToday) * 100; acc += r.value
+                      return `${hues[i % hues.length]} ${from}% ${(acc / totalToday) * 100}%`
+                    }).join(', ')
+                    return (
+                      <div className="mb-4 flex items-center gap-5">
+                        <div className="adm-donut h-28 w-28 shrink-0" style={{ background: `conic-gradient(${segs})` }}>
+                          <div className="adm-donut-label">
+                            <span className="font-display text-lg font-extrabold">{totalToday}</span>
+                            <span className="text-[9px] font-semibold uppercase text-muted">calls</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1.5 text-[11px]">
+                          {rows.map((r, i) => (
+                            <p key={r.label} className="flex items-center gap-2 font-semibold">
+                              <span className="h-2 w-2 rounded-full" style={{ background: hues[i % hues.length] }} /> {r.label} · {r.value}
+                            </p>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                    <div className="space-y-1.5 text-[11px]">
-                      {([['#22c55e', 'Booked · 18'], ['#3b82f6', 'No Answer · 90'], ['#d4ac4a', 'Callback · 28'], ['#ef4444', 'Not Int. · 43'], ['#6b7488', 'Other · 35']] as [string, string][]).map(([c, l]) => (
-                        <p key={l} className="flex items-center gap-2 font-semibold"><span className="h-2 w-2 rounded-full" style={{ background: c }} /> {l}</p>
-                      ))}
-                    </div>
-                  </div>
+                    )
+                  })()}
                   <button type="button" onClick={() => setSection('caller')} className="w-full cursor-pointer rounded-xl bg-accent py-2.5 text-xs font-bold text-on-accent transition-opacity hover:opacity-90">Open Caller admin →</button>
                 </Card>
               </div>
@@ -855,215 +1415,521 @@ export default function Admin() {
           )}
 
           {/* ============ PEOPLE & ROLES ============ */}
-          {section === 'people' && (
-            <>
-              {pending.length > 0 && (
-                <Card className="mb-5 border-warning/50 p-5">
-                  <p className="mb-3 font-display text-sm font-extrabold text-warning">Pending registrations ({pending.length})</p>
-                  {pending.map((a) => (
-                    <div key={a.id} className="flex flex-wrap items-center gap-3 border-b border-border py-3 last:border-0">
-                      <Avatar name={a.name} color="var(--warning)" size={38} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-bold">{a.name} <span className="ml-1 text-xs font-normal text-muted">{a.team === 'MY' ? '🇲🇾' : '🇮🇩'} {a.phone} · {a.email}</span></p>
+          {section === 'people' && (() => {
+            const filtered = people.filter((a) =>
+              (team === 'ALL' || a.country === team)
+              && (!pplQ || a.name.toLowerCase().includes(pplQ.toLowerCase())
+                  || (a.email ?? '').toLowerCase().includes(pplQ.toLowerCase())))
+            const pending = filtered.filter((a) => a.status === 'pending')
+            return (
+              <>
+                {pending.length > 0 && (
+                  <Card className="mb-5 border-warning/50 p-5">
+                    <p className="mb-3 font-display text-sm font-extrabold text-warning">
+                      Pending registrations ({pending.length})
+                    </p>
+                    {pending.map((a) => (
+                      <div key={a.id} className="flex flex-wrap items-center gap-3 border-b border-border py-3 last:border-0">
+                        <Avatar name={a.name} color="var(--warning)" size={38} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold">{a.name}
+                            <span className="ml-1 text-xs font-normal text-muted">
+                              {a.country === 'MY' ? 'MY' : 'ID'} {a.phone} - {a.email}
+                            </span>
+                          </p>
+                        </div>
+                        <button type="button" disabled={pplBusy}
+                          onClick={() => pplSave(async () => await supabase!.from('profiles')
+                            .update({ status: 'active' }).eq('id', a.id), a.name + ' approved')}
+                          className="flex cursor-pointer items-center gap-1 rounded-lg bg-success px-3.5 py-2 text-xs font-bold text-white hover:opacity-90">
+                          <Check size={13} /> Approve
+                        </button>
+                        <button type="button" disabled={pplBusy}
+                          onClick={() => pplSave(async () => await supabase!.from('profiles')
+                            .update({ status: 'rejected' }).eq('id', a.id), a.name + ' rejected')}
+                          className="flex cursor-pointer items-center gap-1 rounded-lg border border-danger/50 px-3.5 py-2 text-xs font-bold text-danger hover:bg-danger/10">
+                          <Ban size={13} /> Reject
+                        </button>
                       </div>
-                      <button type="button" onClick={() => setAgentStatus(a.id, 'active', `${a.name} approved`)} className="flex cursor-pointer items-center gap-1 rounded-lg bg-success px-3.5 py-2 text-xs font-bold text-white transition-opacity hover:opacity-90"><Check size={13} /> Approve</button>
-                      <button type="button" onClick={() => { setAgents((as) => as.filter((x) => x.id !== a.id)); say(`${a.name} rejected`) }} className="flex cursor-pointer items-center gap-1 rounded-lg border border-danger/50 px-3.5 py-2 text-xs font-bold text-danger transition-colors hover:bg-danger/10"><Ban size={13} /> Reject</button>
-                    </div>
-                  ))}
+                    ))}
+                  </Card>
+                )}
+
+                <Card className="mb-3 flex flex-wrap items-center gap-2 p-3">
+                  <input value={pplQ} onChange={(e) => setPplQ(e.target.value)}
+                    placeholder="Search name or email"
+                    className="h-10 min-w-[200px] flex-1 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+                  <span className="text-[11px] text-muted">{filtered.length} people</span>
+                  <button type="button"
+                    onClick={() => {
+                      exportCsv(`people-${team}-${new Date().toISOString().slice(0, 10)}`, filtered.map((a) => ({
+                        name: a.name, email: a.email, phone: a.phone, country: a.country,
+                        role: a.role, status: a.status, career_rank: a.career_rank,
+                        elite_captain: a.is_elite ? 'yes' : '',
+                      })))
+                      say(`Exported ${filtered.length} people`)
+                    }}
+                    className="flex cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-muted hover:border-accent/60 hover:text-ink">
+                    <Download size={13} /> CSV
+                  </button>
                 </Card>
-              )}
-              <Card className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
-                      <th className="px-4 py-3">Person</th><th className="px-4 py-3">Country</th><th className="px-4 py-3">Role</th><th className="px-4 py-3">Rank</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fAgents.filter((a) => a.status !== 'pending').map((a) => (
-                      <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2.5">
-                            <Avatar name={a.name} color="var(--accent)" size={32} />
-                            <div>
-                              <p className="font-semibold">{a.elite ? `Captain ${a.name.split(' ')[0]}` : a.name} {a.elite && <Crown size={12} className="inline text-accent" />}</p>
-                              <p className="text-[11px] text-muted">{a.email}</p>
+
+                <Card className="overflow-x-auto">
+                  <table className="w-full min-w-[820px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
+                        <th className="px-4 py-3">Person</th>
+                        <th className="px-4 py-3">Country</th>
+                        <th className="px-4 py-3">Challenge roles</th>
+                        <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.filter((a) => a.status !== 'pending').map((a) => (
+                        <tr key={a.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
+                          <td className="px-4 py-3">
+                            {/* click the person to open the full profile drawer */}
+                            <div className="flex cursor-pointer items-center gap-2.5"
+                              onClick={() => setOpenWarrior(a)}
+                              title={`Open ${a.name}'s profile`}>
+                              <Avatar name={a.name} color="var(--accent)" size={32} />
+                              <div>
+                                <p className="flex flex-wrap items-center gap-2 font-semibold">
+                                  {a.name}
+                                  <BadgeRow rank={a.career_rank} captain={captainIds.has(a.id)}
+                                    elite={a.is_elite}
+                                    positions={POSITIONS.filter((r) => hasRole(a.id, r.v)).map((r) => r.v)} />
+                                </p>
+                                <p className="text-[11px] text-muted">{a.email ?? a.phone ?? '-'}</p>
+                              </div>
                             </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">{a.team === 'MY' ? '🇲🇾 MY' : '🇮🇩 ID'}</td>
-                        <td className="px-4 py-3"><Chip tone={a.role === 'leader' ? 'accent' : 'default'}>{a.role}</Chip></td>
-                        <td className="px-4 py-3"><Chip>{a.rank}</Chip></td>
-                        <td className="px-4 py-3"><Chip tone={a.status === 'active' ? 'success' : 'warning'}>{a.status}</Chip></td>
-                        <td className="px-4 py-3 text-right">
-                          {a.status === 'active' ? (
-                            <button type="button" onClick={() => setAgentStatus(a.id, 'paused', `${a.name} paused`)} className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted transition-colors hover:text-warning"><Pause size={12} className="mr-1 inline" />Pause</button>
-                          ) : (
-                            <button type="button" onClick={() => setAgentStatus(a.id, 'active', `${a.name} reactivated`)} className="cursor-pointer rounded-lg bg-success px-3 py-1.5 text-xs font-bold text-white"><Play size={12} className="mr-1 inline" />Reactivate</button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <p className="p-4 text-[11px] text-muted">Roles are delegable — e.g. assign a <b>Caller Admin</b> for one country without full admin access. Country is editable per person (admin override).</p>
-              </Card>
-            </>
-          )}
+                          </td>
+                          <td className="px-4 py-3">{a.country ?? '-'}</td>
+                          <td className="px-4 py-3">
+                            {/* system 1: career ladder */}
+                            <select value={a.career_rank ?? 'REN'} disabled={pplBusy}
+                              aria-label={`Career rank for ${a.name}`}
+                              onChange={(e) => setCareer(a, e.target.value)}
+                              className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2 text-[11px] font-bold outline-none">
+                              {CAREER_RANKS.map((r) => <option key={r.v} value={r.v}>{r.icon} {r.v}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-4 py-3">
+                            {/* One guarded dropdown instead of tappable chips — nothing
+                                changes without picking from the list AND confirming. The
+                                badges beside the name show what is currently held. */}
+                            <select value="" disabled={pplBusy}
+                              aria-label={'Positions for ' + a.name}
+                              onChange={(e) => { const r = POSITIONS.find((x) => x.v === e.target.value)
+                                if (r) togglePosition(a, r.v, r.label) }}
+                              className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2 text-[11px] outline-none">
+                              <option value="">＋ Positions…</option>
+                              {POSITIONS.map((r) => (
+                                <option key={r.v} value={r.v}>
+                                  {hasRole(a.id, r.v) ? '✓ ' : ''}{r.icon} {r.label}{hasRole(a.id, r.v) ? ' — remove' : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Chip tone={a.status === 'active' ? 'success' : a.status === 'rejected' ? 'danger' : 'warning'}>
+                              {a.status}
+                            </Chip>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {a.status === 'active' ? (
+                              <button type="button" disabled={pplBusy}
+                                onClick={() => pplSave(async () => await supabase!.from('profiles')
+                                  .update({ status: 'paused' }).eq('id', a.id), a.name + ' paused')}
+                                className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted hover:text-warning">
+                                <Pause size={12} className="mr-1 inline" />Pause
+                              </button>
+                            ) : (
+                              <button type="button" disabled={pplBusy}
+                                onClick={() => pplSave(async () => await supabase!.from('profiles')
+                                  .update({ status: 'active' }).eq('id', a.id), a.name + ' reactivated')}
+                                className="cursor-pointer rounded-lg bg-success px-3 py-1.5 text-xs font-bold text-white">
+                                <Play size={12} className="mr-1 inline" />Reactivate
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {filtered.length === 0 && (
+                        <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-muted">Nobody matches.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <p className="p-4 text-[11px] text-muted">
+                    Three separate systems, never mixed: <b>Career</b> (REN→VP ladder) ·
+                        <b> Tim Elit</b> (Captain/Elite — managed in Elite &amp; Captains) ·
+                        <b> Positions</b> (stackable; <b>Elite Coach</b> approves evidence in the
+                        Coach Review Queue — grant it before the cohort starts).
+                  </p>
+                </Card>
+                {openWarrior && (
+                  <WarriorProfile
+                    person={{ id: openWarrior.id, name: openWarrior.name, email: openWarrior.email,
+                      country: openWarrior.country, career_rank: openWarrior.career_rank,
+                      is_elite: openWarrior.is_elite, captain: captainIds.has(openWarrior.id),
+                      positions: POSITIONS.filter((r) => hasRole(openWarrior.id, r.v)).map((r) => r.v) }}
+                    onClose={() => setOpenWarrior(null)} />
+                )}
+              </>
+            )
+          })()}
 
-          {/* ============ SALES OVERSIGHT ============ */}
-          {section === 'sales' && (
-            <>
-              <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-6">
-                {STAGES.map((s, i) => {
-                  const hues = ['#3b82f6', '#6366f1', '#8b5cf6', '#d4ac4a', '#f59e0b', '#22c55e']
-                  return (
-                    <div
-                      key={s}
-                      className="adm-kpi p-3 text-center"
-                      style={{ borderColor: `${hues[i]}44` }}
-                    >
-                      <p className="font-display text-xl font-extrabold" style={{ color: hues[i] }}>{STAGE_COUNTS[i]}</p>
-                      <p className="text-[9px] font-semibold uppercase tracking-wide text-muted">{s}</p>
-                      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface2">
-                        <div className="h-full rounded-full" style={{ width: `${(STAGE_COUNTS[i] / 40) * 100}%`, background: hues[i] }} />
-                      </div>
+          {section === 'sales' && (() => {
+            const total = Object.values(chStages ?? {}).reduce((t, n) => t + n, 0)
+            const hues = ['#3b82f6','#6366f1','#8b5cf6','#a78bfa','#d4ac4a','#f59e0b','#fb923c',
+                          '#f472b6','#ec4899','#22c55e','#ef4444','#64748b','#6b7488']
+            return (
+              <>
+                <Card className="mb-4 p-5">
+                  <p className="mb-1 font-display text-sm font-extrabold">30-Day Challenge pipeline — live</p>
+                  <p className="mb-4 text-xs text-muted">
+                    Every lead in the challenge CRM by stage. Closings count only when a human Coach verifies them.
+                  </p>
+                  {chStages === null ? (
+                    <p className="py-6 text-center text-xs text-muted">Loading...</p>
+                  ) : total === 0 ? (
+                    <div className="py-8 text-center">
+                      <p className="text-sm font-bold">Pipeline is empty - and that is correct</p>
+                      <p className="mx-auto mt-1 max-w-md text-xs text-muted">
+                        The cohort has not started. From 8 August, every lead your warriors log in the
+                        30-Day Challenge appears here by stage, and verified closings count up below.
+                      </p>
                     </div>
-                  )
-                })}
-              </div>
-              <Card className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
-                      <th className="px-4 py-3">Client</th><th className="px-4 py-3">Project</th><th className="px-4 py-3">Price</th><th className="px-4 py-3">Commission</th><th className="px-4 py-3">Stage</th><th className="px-4 py-3">Agent</th><th className="px-4 py-3">Country</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fDeals.map((d) => (
-                      <tr key={d.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
-                        <td className="px-4 py-3 font-semibold">{d.client}</td>
-                        <td className="px-4 py-3">{d.project}</td>
-                        <td className="px-4 py-3">{d.price}</td>
-                        <td className="px-4 py-3 font-semibold text-accent">{d.comm}</td>
-                        <td className="px-4 py-3"><Chip tone={d.stage === 'Closed' ? 'success' : d.stage === 'Calling' ? 'info' : 'warning'}>{d.stage}</Chip></td>
-                        <td className="px-4 py-3">{d.agent}</td>
-                        <td className="px-4 py-3">{d.team === 'MY' ? '🇲🇾' : '🇮🇩'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
-            </>
-          )}
+                  ) : (
+                    CH_STAGES.filter((st) => (chStages[st] ?? 0) > 0).map((st, i) => {
+                      const max = Math.max(...Object.values(chStages))
+                      return (
+                        <div key={st} className="adm-funnel-step"
+                          style={{ width: `${55 + ((chStages[st] ?? 0) / max) * 45}%`,
+                                   background: `linear-gradient(90deg, ${hues[i % hues.length]}cc, ${hues[i % hues.length]})` }}>
+                          <span>{st.replaceAll('_', ' ')}</span>
+                          <span>{chStages[st]}</span>
+                        </div>
+                      )
+                    })
+                  )}
+                </Card>
+                <div className="grid grid-cols-2 gap-3 md:max-w-md">
+                  <div className="adm-kpi p-4">
+                    <p className="font-display text-2xl font-extrabold">{chClosings?.total ?? '—'}</p>
+                    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">Closings submitted</p>
+                  </div>
+                  <div className="adm-kpi p-4">
+                    <p className="font-display text-2xl font-extrabold text-success">{chClosings?.verified ?? '—'}</p>
+                    <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted">Verified by Coach</p>
+                  </div>
+                </div>
+                <button type="button"
+                  onClick={async () => {
+                    const rows = await fetchAll<{ client_name: string; client_phone: string | null
+                      project: string | null; unit_no: string | null; price: number; commission: number
+                      stage: string; country: string; created_at: string
+                      profiles: { name: string } | null }>((from, to) =>
+                      supabase!.from('deals')
+                        .select('client_name,client_phone,project,unit_no,price,commission,stage,country,created_at,profiles!deals_agent_id_fkey(name)')
+                        .order('created_at', { ascending: false }).range(from, to) as never)
+                    const scoped = rows.filter((r) => team === 'ALL' || r.country === team)
+                    if (!scoped.length) { say('No deals to export yet'); return }
+                    exportCsv(`deals-${team}-${new Date().toISOString().slice(0, 10)}`, scoped.map((r) => ({
+                      agent: r.profiles?.name ?? '', client: r.client_name, phone: r.client_phone,
+                      project: r.project, unit: r.unit_no, price: r.price, commission: r.commission,
+                      stage: r.stage, country: r.country, created: r.created_at?.slice(0, 10),
+                    })))
+                    say(`Exported ${scoped.length} deals`)
+                  }}
+                  className="mt-4 flex cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-xs font-bold text-muted hover:border-accent/60 hover:text-ink">
+                  <Download size={13} /> Export company deals CSV
+                </button>
+              </>
+            )
+          })()}
 
-          {/* ============ ACTIVITY MONITOR ============ */}
           {section === 'activity' && (
             <Card className="p-5">
-              <p className="mb-1 font-display text-sm font-extrabold">Daily time-boxing — live</p>
-              <p className="mb-4 text-xs text-muted">Every agent's plan & completion today (from My Day)</p>
-              {fActivity.map((a) => (
-                <div key={a.name} className="mb-4 rounded-xl border border-border p-3.5">
-                  <div className="mb-1.5 flex items-center gap-2.5">
-                    <Avatar name={a.name} color={a.pct >= 60 ? 'var(--success)' : a.pct > 0 ? 'var(--warning)' : 'var(--danger)'} size={32} />
-                    <p className="flex-1 text-sm font-semibold">{a.team === 'MY' ? '🇲🇾' : '🇮🇩'} {a.name}</p>
-                    <p className="text-xs text-muted">{a.done}/{a.total} tasks · ⭐{a.points}</p>
-                    <span className="font-display text-sm font-extrabold">{a.pct}%</span>
+              <p className="mb-1 font-display text-sm font-extrabold">Daily activity — live</p>
+              <p className="mb-4 text-xs text-muted">
+                Today's plan counts from My Day plus calls made. Task contents stay private
+                to each warrior - leadership sees the numbers, never the list.
+              </p>
+              {act === null && <p className="py-6 text-center text-xs text-muted">Loading...</p>}
+              {act !== null && act.filter((a) => team === 'ALL' || a.country === team).length === 0 && (
+                <p className="py-6 text-center text-xs text-muted">No active warriors in this view.</p>
+              )}
+              {(act ?? []).filter((a) => team === 'ALL' || a.country === team).map((a) => {
+                const pct = a.planned > 0 ? Math.round((a.done / a.planned) * 100) : 0
+                return (
+                  <div key={a.user_id} className="mb-4 rounded-xl border border-border p-3.5">
+                    <div className="mb-1.5 flex items-center gap-2.5">
+                      <Avatar name={a.name}
+                        color={pct >= 60 ? 'var(--success)' : a.planned > 0 ? 'var(--warning)' : 'var(--danger)'} size={32} />
+                      <p className="flex-1 text-sm font-semibold">{a.country ?? ''} {a.name}</p>
+                      <p className="text-xs text-muted">
+                        {a.done}/{a.planned} tasks{a.calls_today > 0 ? ` · ${a.calls_today} calls` : ''}
+                      </p>
+                      <span className="font-display text-sm font-extrabold">{a.planned > 0 ? pct + '%' : '—'}</span>
+                    </div>
+                    <Bar pct={a.planned > 0 ? pct : 0} />
+                    {a.planned === 0 && a.calls_today === 0 && (
+                      <p className="mt-1.5 text-[11px] font-semibold text-danger">No plan and no calls today</p>
+                    )}
                   </div>
-                  <Bar pct={a.pct} />
-                  {a.pct === 0 && <p className="mt-1.5 text-[11px] font-semibold text-danger">No plan today — nudge?</p>}
-                </div>
-              ))}
+                )
+              })}
             </Card>
           )}
 
           {/* ============ ELITE & CAPTAINS ============ */}
-          {section === 'elite' && (
-            <>
-              {/* army command banner */}
-              <div
-                className="mb-5 flex items-center gap-4 rounded-2xl border p-4"
-                style={{
-                  borderColor: '#3a3f1f',
-                  background:
-                    'repeating-linear-gradient(45deg, rgba(109,112,40,.16) 0 12px, rgba(73,74,23,.16) 12px 24px), linear-gradient(180deg, #22260f, #11130d)',
-                  color: '#e9e2cc',
-                }}
-              >
-                <img src="/brand/tim-elit-logo.png" alt="" className="h-14 w-14 rounded-xl border-2 object-contain p-1" style={{ borderColor: '#6d7028', background: '#14180a' }} />
-                <div className="min-w-0 flex-1">
-                  <p className="font-display text-base font-extrabold uppercase tracking-[0.12em]" style={{ color: '#d8b25a' }}>
-                    Elite Team Command — Admin
-                  </p>
-                  <p className="text-[11px]" style={{ color: '#c9c2a8' }}>
-                    {fPods.length} pods · {fPods.reduce((s, p) => s + p.members, 0)} warriors · unified MY model 60/10/15/15
-                  </p>
-                </div>
-                <span
-                  className="rounded-full px-3 py-1.5 font-display text-[10px] font-extrabold uppercase tracking-widest"
-                  style={{ background: 'linear-gradient(180deg,#d8b25a,#b08a3a)', color: '#1a1407' }}
+          {section === 'elite' && (() => {
+            /* the All/MY/ID switcher scopes EVERYTHING here — chips, counts,
+               search hits, captain picker and the pod table */
+            const inTeam = (c: string | null | undefined) => team === 'ALL' || c === team
+            const eliteFolk = people.filter((a) => a.is_elite && inTeam(a.country))
+            const teamPods = livePods.filter((p) => inTeam(p.country))
+            const teamMembers = podMembers.filter((m) =>
+              teamPods.some((p) => p.id === m.pod_id))
+            const nameOf = (id: string) => people.find((x) => x.id === id)?.name ?? 'Unknown'
+            const searchHits = eliteQ.trim()
+              ? people.filter((a) => a.status === 'active' && inTeam(a.country)
+                  && a.name.toLowerCase().includes(eliteQ.toLowerCase())).slice(0, 8)
+              : []
+            return (
+              <>
+                {/* army command banner */}
+                <div
+                  className="mb-5 flex items-center gap-4 rounded-2xl border p-4"
+                  style={{
+                    borderColor: '#3a3f1f',
+                    background:
+                      'repeating-linear-gradient(45deg, rgba(109,112,40,.16) 0 12px, rgba(73,74,23,.16) 12px 24px), linear-gradient(180deg, #22260f, #11130d)',
+                    color: '#e9e2cc',
+                  }}
                 >
-                  Warrior Force
-                </span>
-              </div>
-              <div className="mb-5 flex flex-wrap gap-2">
-                <button type="button" onClick={() => say('Manage Elite Team: appoint / rank REN-L-TL-HOT / demote — requires admin password re-entry')} className="cursor-pointer rounded-xl bg-accent px-4 py-2.5 text-xs font-bold text-on-accent">🎖️ Manage Elite Team</button>
-                <button type="button" onClick={() => say('Create Pod: name + 👑 Captain (must be Elite) + members')} className="cursor-pointer rounded-xl border border-border px-4 py-2.5 text-xs font-bold text-muted hover:text-ink">➕ Create Pod</button>
-              </div>
-              <Card className="overflow-x-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
-                      <th className="px-4 py-3">Pod</th><th className="px-4 py-3">Captain</th><th className="px-4 py-3">Country</th><th className="px-4 py-3">Members</th><th className="px-4 py-3">Closings</th><th className="px-4 py-3">Pool in</th><th className="px-4 py-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {fPods.map((p) => (
-                      <tr key={p.name} className="border-b border-border last:border-0 hover:bg-surface2/50">
-                        <td className="px-4 py-3 font-display font-extrabold">{p.name}</td>
-                        <td className="px-4 py-3">👑 Captain {p.captain}</td>
-                        <td className="px-4 py-3">{p.team === 'MY' ? '🇲🇾' : '🇮🇩'}</td>
-                        <td className="px-4 py-3">{p.members}</td>
-                        <td className="px-4 py-3">{p.closings}</td>
-                        <td className="px-4 py-3 font-semibold text-accent">{p.poolIn}</td>
-                        <td className="px-4 py-3 text-right">
-                          <button type="button" onClick={() => say(`${p.name}: board, leads, manage members`)} className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted hover:text-ink">View</button>
-                        </td>
-                      </tr>
+                  <img src="/brand/tim-elit-logo.png" alt="" className="h-14 w-14 rounded-xl border-2 object-contain p-1" style={{ borderColor: '#6d7028', background: '#14180a' }} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-display text-base font-extrabold uppercase tracking-[0.12em]" style={{ color: '#d8b25a' }}>
+                      Elite Team Command
+                    </p>
+                    <p className="text-[11px]" style={{ color: '#c9c2a8' }}>
+                      {team !== 'ALL' ? `${team === 'MY' ? '🇲🇾' : '🇮🇩'} ` : ''}{eliteFolk.length} elite warriors - {teamPods.length} pods - {teamMembers.length} pod members
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mb-5 grid gap-3 lg:grid-cols-2">
+                  {/* -------- appoint / demote elite -------- */}
+                  <Card className="p-4">
+                    <p className="mb-1 text-sm font-bold">Manage Elite Team</p>
+                    <p className="mb-3 text-[11px] text-muted">
+                      Search any active warrior and appoint them. A serving Captain must hand over
+                      their pod before they can be demoted - the database enforces it.
+                    </p>
+                    <input value={eliteQ} onChange={(e) => setEliteQ(e.target.value)}
+                      placeholder="Search warriors to appoint"
+                      className="mb-2 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
+                    {searchHits.map((a) => (
+                      <div key={a.id} className="flex items-center gap-2.5 border-b border-border py-2 last:border-0">
+                        <Avatar name={a.name} color="var(--accent)" size={28} />
+                        <span className="min-w-0 flex-1 truncate text-sm">{a.name}
+                          <span className="ml-1 text-[10px] text-muted">{a.country}</span></span>
+                        <button type="button" disabled={pplBusy}
+                          onClick={() => pplSave(async () => await supabase!.rpc('fn_set_elite',
+                            { p_user: a.id, p_elite: !a.is_elite }),
+                            a.name + (a.is_elite ? ' removed from Tim Elit' : ' appointed to Tim Elit')).then(loadElite)}
+                          className={clsx('cursor-pointer rounded-full border px-3 py-1.5 text-[11px] font-extrabold',
+                            a.is_elite ? 'border-danger/50 text-danger' : 'border-accent bg-accent-soft text-accent')}>
+                          {a.is_elite ? 'Demote' : 'Appoint'}
+                        </button>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-                <p className="p-4 text-[11px] text-muted">Unified Malaysian model: closer 60% · Ads & Content 10% · funder 15% · Elite Pool 15% · RGR on top. "Captain" is a position (pod leader), not a rank.</p>
+                    {eliteFolk.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {eliteFolk.map((a) => (
+                          <Chip key={a.id} tone="accent"><Crown size={10} /> {a.name}</Chip>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* -------- create pod -------- */}
+                  <Card className="p-4">
+                    <p className="mb-1 text-sm font-bold">Create Pod</p>
+                    <p className="mb-3 text-[11px] text-muted">
+                      The Captain must already be Elite - appoint them on the left first.
+                    </p>
+                    <input value={podForm.name} onChange={(e) => setPodForm({ ...podForm, name: e.target.value })}
+                      placeholder="Pod name, e.g. ALPHA"
+                      className="mb-2 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm uppercase outline-none focus:border-accent" />
+                    <div className="mb-2 flex gap-2">
+                      <select value={podForm.captain} onChange={(e) => setPodForm({ ...podForm, captain: e.target.value })}
+                        aria-label="Captain"
+                        className="h-10 min-w-0 flex-1 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none">
+                        <option value="">Choose Captain (elite only)</option>
+                        {eliteFolk.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                      <select value={team !== 'ALL' ? team : podForm.country}
+                        onChange={(e) => setPodForm({ ...podForm, country: e.target.value })}
+                        disabled={team !== 'ALL'} aria-label="Country"
+                        title={team !== 'ALL' ? 'Country follows the All/MY/ID switcher above' : undefined}
+                        className="h-10 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none disabled:opacity-60">
+                        <option value="MY">MY</option>
+                        <option value="ID">ID</option>
+                      </select>
+                    </div>
+                    <button type="button" disabled={pplBusy || !podForm.name.trim() || !podForm.captain}
+                      onClick={() => pplSave(async () => await supabase!.rpc('fn_create_pod',
+                        { p_name: podForm.name, p_captain: podForm.captain,
+                          p_country: team !== 'ALL' ? team : podForm.country }),
+                        'Pod ' + podForm.name.toUpperCase() + ' created').then(() => { setPodForm({ ...podForm, name: '', captain: '' }); loadElite() })}
+                      className="h-10 w-full cursor-pointer rounded-xl bg-accent text-xs font-extrabold text-on-accent disabled:opacity-40">
+                      + Create Pod
+                    </button>
+                  </Card>
+                </div>
+
+                <Card className="overflow-x-auto">
+                  <table className="w-full min-w-[560px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted">
+                        <th className="px-4 py-3">Pod</th><th className="px-4 py-3">Captain</th>
+                        <th className="px-4 py-3">Country</th><th className="px-4 py-3">Members</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamPods.map((p) => (
+                        <tr key={p.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
+                          <td className="px-4 py-3 font-display font-extrabold">{p.name}</td>
+                          <td className="px-4 py-3">{nameOf(p.captain_id)}</td>
+                          <td className="px-4 py-3">{p.country}</td>
+                          <td className="px-4 py-3">{podMembers.filter((m) => m.pod_id === p.id).length}</td>
+                          <td className="px-4 py-3 text-right">
+                            <button type="button" disabled={pplBusy}
+                              onClick={() => { if (confirm('Disband pod ' + p.name + '?'))
+                                pplSave(async () => await supabase!.from('pods').delete().eq('id', p.id),
+                                  'Pod ' + p.name + ' disbanded').then(loadElite) }}
+                              className="cursor-pointer rounded-lg border border-danger/50 px-3 py-1.5 text-xs font-bold text-danger">
+                              Disband
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {livePods.length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-muted">
+                          No pods yet. Appoint Elite members, then create the first pod above.
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <p className="p-4 text-[11px] text-muted">
+                    Closings and the Balang pool are not shown yet - no funded-closing feed is
+                    connected, and an invented figure would be worse than none.
+                    "Captain" is a position (pod leader), not a rank.
+                  </p>
+                </Card>
+              </>
+            )
+          })()}
+
+          {section === 'booths' && (
+            <>
+              <Card className="mb-4 max-w-3xl p-4">
+                <p className="mb-2 text-sm font-bold">Create booth</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <input value={boothForm.title} onChange={(e) => setBoothForm({ ...boothForm, title: e.target.value })}
+                    placeholder="Booth title * (e.g. MidValley Megamall)"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent md:col-span-2" />
+                  <input value={boothForm.location} onChange={(e) => setBoothForm({ ...boothForm, location: e.target.value })}
+                    placeholder="Location / address"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <select value={boothForm.country} onChange={(e) => setBoothForm({ ...boothForm, country: e.target.value })}
+                    aria-label="Country"
+                    className="h-10 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+                    <option value="MY">MY</option><option value="ID">ID</option>
+                  </select>
+                  <label className="block">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted">First day *</span>
+                    <input type="date" value={boothForm.date_start}
+                      onChange={(e) => setBoothForm({ ...boothForm, date_start: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none" />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Last day *</span>
+                    <input type="date" value={boothForm.date_end}
+                      onChange={(e) => setBoothForm({ ...boothForm, date_end: e.target.value })}
+                      className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none" />
+                  </label>
+                  <div className="flex items-end gap-3 md:col-span-2">
+                    {(['am', 'pm'] as const).map((k) => (
+                      <label key={k} className="flex cursor-pointer items-center gap-1.5 text-xs font-bold">
+                        <input type="checkbox" checked={boothForm[k]}
+                          onChange={(e) => setBoothForm({ ...boothForm, [k]: e.target.checked })} />
+                        {k.toUpperCase()} shift
+                      </label>
+                    ))}
+                    <button type="button"
+                      disabled={rwBusy || !boothForm.title.trim() || !boothForm.date_start || !boothForm.date_end
+                        || boothForm.date_end < boothForm.date_start || (!boothForm.am && !boothForm.pm)}
+                      onClick={() => rwSave(async () => await supabase!.from('booths').insert({
+                        title: boothForm.title.trim(),
+                        location: boothForm.location.trim() || null,
+                        country: boothForm.country,
+                        date_start: boothForm.date_start,
+                        date_end: boothForm.date_end,
+                        shifts: [boothForm.am && 'AM', boothForm.pm && 'PM'].filter(Boolean),
+                      }), 'Booth created').then(() => { setBoothForm({ ...boothForm, title: '', location: '' }); loadBooths() })}
+                      className="ml-auto h-10 cursor-pointer rounded-xl bg-accent px-5 text-xs font-extrabold text-on-accent disabled:opacity-40">
+                      + Create booth
+                    </button>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="max-w-3xl">
+                {booths.filter((b) => team === 'ALL' || b.country === team).map((b) => {
+                  const mine = signups.filter((g) => g.booth_id === b.id)
+                  const days = b.date_start && b.date_end
+                    ? Math.round((+new Date(b.date_end) - +new Date(b.date_start)) / 864e5) + 1 : 0
+                  return (
+                    <div key={b.id} className="flex flex-wrap items-center gap-3 border-b border-border p-4 last:border-0">
+                      <span className="text-xl">⛺</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-bold">{b.country === 'MY' ? '🇲🇾' : '🇮🇩'} {b.title}</p>
+                        <p className="text-[11px] text-muted">
+                          {[b.location, b.date_start && b.date_end
+                            && `${new Date(b.date_start).toLocaleDateString()} – ${new Date(b.date_end).toLocaleDateString()} (${days}d)`,
+                            (b.shifts ?? []).join(' + ')].filter(Boolean).join(' · ')}
+                        </p>
+                      </div>
+                      <Chip tone={mine.length > 0 ? 'success' : 'default'}>{mine.length} signed up</Chip>
+                      <button type="button" disabled={rwBusy}
+                        onClick={() => { if (confirm(`Delete booth "${b.title}"? Signups go with it.`))
+                          rwSave(async () => await supabase!.from('booths').delete().eq('id', b.id),
+                            'Booth deleted').then(loadBooths) }}
+                        className="cursor-pointer rounded-lg border border-danger/50 px-3 py-1.5 text-xs font-bold text-danger">
+                        Delete
+                      </button>
+                    </div>
+                  )
+                })}
+                {booths.length === 0 && (
+                  <p className="p-8 text-center text-xs text-muted">
+                    No booths yet. Create the first one above — warriors can then be signed up per day and shift.
+                  </p>
+                )}
               </Card>
             </>
           )}
 
-          {/* ============ BOOTHS ============ */}
-          {section === 'booths' && (
-            <Card className="max-w-2xl p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="font-display text-sm font-extrabold">Booth / roadshow events</p>
-                <button type="button" onClick={() => say('Create booth: days, AM/PM shifts, headcount, poster')} className="cursor-pointer rounded-lg bg-accent px-3.5 py-2 text-xs font-bold text-on-accent">+ Create booth</button>
-              </div>
-              {[
-                { t: 'MidValley Megamall', when: 'Sat–Sun 9–10 Aug', team: 'MY' as const, reg: 12, leads: 34 },
-                { t: 'Pavilion Bukit Jalil', when: 'Sat 16 Aug', team: 'MY' as const, reg: 6, leads: 0 },
-                { t: 'Kota Kasablanka JKT', when: 'Sun 17 Aug', team: 'ID' as const, reg: 8, leads: 0 },
-              ].filter((b) => team === 'ALL' || b.team === team).map((b) => (
-                <div key={b.t} className="flex items-center gap-3 border-b border-border py-3 last:border-0">
-                  <span className="text-xl">⛺</span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{b.team === 'MY' ? '🇲🇾' : '🇮🇩'} {b.t}</p>
-                    <p className="text-[11px] text-muted">{b.when} · {b.reg} registered · {b.leads} leads</p>
-                  </div>
-                  <button type="button" onClick={() => say('Roster + CSV/PDF export + leaderboard')} className="cursor-pointer rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted hover:text-ink">Roster</button>
-                </div>
-              ))}
-            </Card>
-          )}
-
-          {/* ============ CALLER · M4U (one function, own sub-tabs) ============ */}
-          {section === 'caller' && supabaseReady && user.id.includes('-') && <CallerAdmin />}
+          {section === 'caller' && supabaseReady && user.id.includes('-') && <CallerAdmin team={team} />}
+          {section === 'events' && <EventsAdmin team={team} />}
+          {section === 'certtpl' && <CertTemplates team={team} />}
+          {section === 'kamalsesi' && <KamalagSessions />}
           {section === 'caller' && !(supabaseReady && user.id.includes('-')) && (
             <>
               <div className="no-scrollbar mb-5 flex gap-1.5 overflow-x-auto">
@@ -1081,6 +1947,17 @@ export default function Admin() {
                   </button>
                 ))}
               </div>
+
+              {/* P0.8 — this whole branch renders ONLY for demo personas (the condition
+                  above is !supabaseReady || demo id). Real accounts get <CallerAdmin/>,
+                  which is 100% live. The banner makes that impossible to mistake. */}
+              <Card className="mb-4 border-warning/50 bg-warning/10 p-3">
+                <p className="text-xs font-extrabold text-warning">⚠ DEMO PREVIEW — not live data</p>
+                <p className="mt-0.5 text-[11px] text-muted">
+                  These are illustrative records for the product demo. Sign in with a real
+                  account to open the live Marketing4U console.
+                </p>
+              </Card>
 
               {callerTab === 'overview' && (
                 <>
@@ -1354,9 +2231,39 @@ export default function Admin() {
           )}
 
           {/* ============ 30-DAY CHALLENGE ============ */}
+          {section === 'talent' && (
+            supabaseReady && user.id.includes('-')
+              ? <TalentAdmin embedded />
+              : <Card className="p-8 text-center text-sm text-muted">Sign in with a real account to open the Talent Compass dashboard.</Card>
+          )}
+
+          {section === 'growonb' && (
+            supabaseReady && user.id.includes('-')
+              ? <OnbAdmin />
+              : <Card className="p-8 text-center text-sm text-muted">Sign in with a real account to manage Grow Onboarding.</Card>
+          )}
+
+          {section === 'social' && (
+            supabaseReady && user.id.includes('-')
+              ? <SocialAdmin />
+              : <Card className="p-8 text-center text-sm text-muted">Sign in with a real account to manage Social Coaching.</Card>
+          )}
+
+          {section === 'atlas' && (
+            supabaseReady && user.id.includes('-')
+              ? <AtlasAdmin />
+              : <Card className="p-8 text-center text-sm text-muted">Sign in with a real account to manage the ATLAS Library.</Card>
+          )}
+
+          {section === 'academy' && (
+            supabaseReady && user.id.includes('-')
+              ? <AcademyAdmin />
+              : <Card className="p-8 text-center text-sm text-muted">Sign in with a real account to manage AG Academy.</Card>
+          )}
+
           {section === 'challenge' && (
             <>
-              <a href="#/coach"
+              <a href="/coach"
                 className="mb-3 flex cursor-pointer items-center gap-3 rounded-xl border border-accent/50 bg-accent-soft p-3.5 no-underline">
                 <span className="text-xl">🛡</span>
                 <div className="min-w-0 flex-1">
@@ -1365,15 +2272,21 @@ export default function Admin() {
                 </div>
               </a>
               <div className="mb-4 flex gap-1.5">
-                {(['progress', 'curriculum', 'coaches', 'reports'] as const).map((ct) => (
+                {(['health', 'progress', 'enrolment', 'curriculum', 'coaches', 'reports', 'governance'] as const).map((ct) => (
                   <button key={ct} type="button" onClick={() => setChTab(ct)}
                     className={clsx('cursor-pointer rounded-full border px-4 py-2 text-xs font-extrabold capitalize', chTab === ct ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-ink')}>
-                    {ct === 'progress' ? '📊 Progress' : ct === 'curriculum' ? '✏️ Curriculum' : ct === 'coaches' ? '👥 Coaches' : '📄 Reports'}
+                    {ct === 'health' ? '🩺 Health' : ct === 'progress' ? '📊 Progress' : ct === 'enrolment' ? '🎯 Enrolment' : ct === 'curriculum' ? '✏️ Curriculum' : ct === 'coaches' ? '👥 Coaches' : ct === 'governance' ? '⚖️ Governance' : '📄 Reports'}
                   </button>
                 ))}
               </div>
-              {chTab === 'progress'
+              {chTab === 'governance'
+                ? <Governance realId={supabaseReady && user.id.includes('-')} />
+                : chTab === 'health'
+                ? <Health team={team} realId={supabaseReady && user.id.includes('-')} />
+                : chTab === 'progress'
                 ? <ChallengeProgress realId={supabaseReady && user.id.includes('-')} />
+                : chTab === 'enrolment'
+                ? <Enrolment team={team} realId={supabaseReady && user.id.includes('-')} onSaved={say} />
                 : chTab === 'curriculum'
                   ? <CurriculumEditor realId={supabaseReady && user.id.includes('-')} onSaved={say} />
                   : chTab === 'coaches'
@@ -1384,45 +2297,244 @@ export default function Admin() {
 
           {/* ============ APP CONTENT ============ */}
           {section === 'content' && (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {([
-                ['Announcements', 'Post to MY, ID or both'],
-                ['Academy / ATLAS', 'Courses, playbook, 30-Day Challenge'],
-                ['Projects & EXSIM docs', 'Commission %, doc templates'],
-                ['Directory', 'Leadership, hotlines, PICs'],
-                ['Win Poster brands', 'Logos & templates per country'],
-                ['Quotes & mascots', 'Home-screen motivation'],
-              ] as [string, string][]).map(([t2, d]) => (
-                <Card key={t2} className="p-4" onClick={() => say(`${t2} manager (full build phase)`)}>
-                  <p className="text-sm font-bold">{t2}</p>
-                  <p className="mt-1 text-[11px] text-muted">{d}</p>
+            <>
+              <div className="mb-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                {([
+                  { t: 'Academy / ATLAS', d: 'Curriculum editor — Challenge lessons', go: 'challenge' as Section },
+                  { t: 'Quotes & motivation', d: 'Caller home-screen quotes', go: 'caller' as Section },
+                  { t: 'Projects & docs', d: 'Projects, pipelines, fields', go: 'caller' as Section },
+                  { t: 'Reward campaigns', d: 'Publish reward campaigns', go: 'rewards' as Section },
+                ]).map((c) => (
+                  <Card key={c.t} className="p-4" onClick={() => setSection(c.go)}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold">{c.t}</p>
+                      <Chip tone="accent">open →</Chip>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted">{c.d}</p>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {/* ---------- Announcements ---------- */}
+                <Card className="p-4">
+                  <p className="mb-1 text-sm font-bold">📣 Announcements</p>
+                  <p className="mb-3 text-[11px] text-muted">
+                    Lands in every warrior's notification bell instantly. Country-scoped.
+                  </p>
+                  <input value={annForm.title} onChange={(e) => setAnnForm({ ...annForm, title: e.target.value })}
+                    placeholder="Title *"
+                    className="mb-2 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <textarea value={annForm.body} onChange={(e) => setAnnForm({ ...annForm, body: e.target.value })}
+                    placeholder="Message *" rows={3}
+                    className="mb-2 w-full rounded-xl border border-border bg-surface2 px-3 py-2 text-sm outline-none focus:border-accent" />
+                  <div className="flex flex-wrap gap-2">
+                    <input value={annForm.link} onChange={(e) => setAnnForm({ ...annForm, link: e.target.value })}
+                      placeholder="Link on tap (optional, e.g. /challenge)"
+                      className="h-10 min-w-[160px] flex-1 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                    <select value={annForm.country} onChange={(e) => setAnnForm({ ...annForm, country: e.target.value })}
+                      aria-label="Country"
+                      className="h-10 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+                      <option value="ALL">🌏 Both</option>
+                      <option value="MY">🇲🇾 MY</option>
+                      <option value="ID">🇮🇩 ID</option>
+                    </select>
+                    <button type="button" disabled={cBusy || !annForm.title.trim() || !annForm.body.trim()}
+                      onClick={() => { if (confirm(`Broadcast to ${annForm.country === 'ALL' ? 'ALL warriors' : annForm.country}?`))
+                        cSave(async () => {
+                          const { data, error } = await supabase!.rpc('fn_announce', {
+                            p_title: annForm.title, p_body: annForm.body,
+                            p_country: annForm.country, p_link: annForm.link.trim() || null,
+                          })
+                          if (!error) say(`Sent to ${(data as { recipients: number })?.recipients ?? '?'} warriors`)
+                          return { error }
+                        }, 'Announcement sent').then(() => setAnnForm({ ...annForm, title: '', body: '', link: '' })) }}
+                      className="h-10 cursor-pointer rounded-xl bg-accent px-5 text-xs font-extrabold text-on-accent disabled:opacity-40">
+                      Broadcast
+                    </button>
+                  </div>
+                  {anns.length > 0 && (
+                    <div className="mt-4 space-y-1.5 border-t border-border pt-3">
+                      {anns.map((a) => (
+                        <p key={a.id} className="text-[11px] text-muted">
+                          <b className="text-ink">{a.title}</b> · {a.country} · {a.recipients} warriors ·
+                          {' '}{new Date(a.created_at).toLocaleString()}
+                        </p>
+                      ))}
+                    </div>
+                  )}
                 </Card>
-              ))}
-            </div>
+
+                {/* ---------- Directory ---------- */}
+                <Card className="p-4">
+                  <p className="mb-1 text-sm font-bold">📇 Directory</p>
+                  <p className="mb-3 text-[11px] text-muted">
+                    Leadership, hotlines and PICs — agents see it under Grow → Directory. WhatsApp-first.
+                  </p>
+                  <div className="mb-2 grid grid-cols-2 gap-2">
+                    <input value={dirForm.name} onChange={(e) => setDirForm({ ...dirForm, name: e.target.value })}
+                      placeholder="Name *"
+                      className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                    <input value={dirForm.role} onChange={(e) => setDirForm({ ...dirForm, role: e.target.value })}
+                      placeholder="Role / title"
+                      className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                    <input value={dirForm.phone} onChange={(e) => setDirForm({ ...dirForm, phone: e.target.value })}
+                      placeholder="Phone +60…"
+                      className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                    <input value={dirForm.email} onChange={(e) => setDirForm({ ...dirForm, email: e.target.value })}
+                      placeholder="Email"
+                      className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                    <select value={dirForm.category} onChange={(e) => setDirForm({ ...dirForm, category: e.target.value })}
+                      aria-label="Category"
+                      className="h-10 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+                      {['Leadership', 'Hotline', 'PIC', 'Support'].map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                    <div className="flex gap-2">
+                      <select value={dirForm.country} onChange={(e) => setDirForm({ ...dirForm, country: e.target.value })}
+                        aria-label="Country"
+                        className="h-10 min-w-0 flex-1 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+                        <option value="ALL">🌏</option><option value="MY">🇲🇾</option><option value="ID">🇮🇩</option>
+                      </select>
+                      <button type="button" disabled={cBusy || !dirForm.name.trim()}
+                        onClick={() => cSave(async () => await supabase!.from('directory_entries').insert({
+                          name: dirForm.name.trim(), role: dirForm.role.trim() || null,
+                          phone: dirForm.phone.trim() || null, email: dirForm.email.trim() || null,
+                          category: dirForm.category, country: dirForm.country, sort: dirs.length,
+                        }), 'Contact added').then(() => setDirForm({ ...dirForm, name: '', role: '', phone: '', email: '' }))}
+                        className="h-10 cursor-pointer rounded-xl bg-accent px-4 text-xs font-extrabold text-on-accent disabled:opacity-40">
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-72 space-y-1 overflow-y-auto border-t border-border pt-2">
+                    {dirs.map((d) => (
+                      <div key={d.id} className="flex flex-wrap items-center gap-2 py-1.5 text-xs">
+                        <Chip>{d.category}</Chip>
+                        <span className="min-w-0 flex-1 truncate font-semibold">{d.name}
+                          <span className="ml-1 font-normal text-muted">{d.role ?? ''} {d.phone ?? ''}</span>
+                        </span>
+                        <span className="text-muted">{d.country}</span>
+                        <button type="button" disabled={cBusy}
+                          onClick={() => cSave(async () => await supabase!.from('directory_entries')
+                            .update({ active: !d.active }).eq('id', d.id), d.active ? 'Hidden' : 'Visible again')}
+                          className={clsx('cursor-pointer rounded-full border px-2.5 py-1 text-[10px] font-bold',
+                            d.active ? 'border-success/60 text-success' : 'border-border text-muted')}>
+                          {d.active ? 'visible' : 'hidden'}
+                        </button>
+                        <button type="button" disabled={cBusy}
+                          onClick={() => { if (confirm(`Delete ${d.name}?`))
+                            cSave(async () => await supabase!.from('directory_entries').delete().eq('id', d.id), 'Deleted') }}
+                          className="cursor-pointer text-[10px] font-bold text-danger">✕</button>
+                      </div>
+                    ))}
+                    {dirs.length === 0 && <p className="py-3 text-center text-[11px] text-muted">No contacts yet.</p>}
+                  </div>
+                </Card>
+              </div>
+            </>
           )}
 
-          {/* ============ REWARDS ============ */}
           {section === 'rewards' && (
-            <Card className="max-w-3xl overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
-                <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted"><th className="px-4 py-3">Campaign</th><th className="px-4 py-3">Tier</th><th className="px-4 py-3">Country</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Status</th></tr></thead>
-                <tbody>
-                  {REWARDS.filter((r) => team === 'ALL' || r.team === team).map((r) => (
-                    <tr key={r.title} className="border-b border-border last:border-0 hover:bg-surface2/50">
-                      <td className="px-4 py-3 font-semibold">{r.title}</td>
-                      <td className="px-4 py-3"><Chip tone="accent">{r.tier}</Chip></td>
-                      <td className="px-4 py-3">{r.team === 'MY' ? '🇲🇾' : '🇮🇩'}</td>
-                      <td className="px-4 py-3 text-xs">{r.target}</td>
-                      <td className="px-4 py-3"><Chip tone={r.active ? 'success' : 'default'}>{r.active ? 'active' : 'draft'}</Chip></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="p-4 text-[11px] text-muted">Rewards are country-scoped — Indonesia gets its own campaigns here (replacing the copied MY test data).</p>
-            </Card>
+            <>
+              <Card className="mb-3 max-w-3xl p-4">
+                <p className="mb-2 text-sm font-bold">Publish a reward campaign</p>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <input value={rwForm.title} onChange={(e) => setRwForm({ ...rwForm, title: e.target.value })}
+                    placeholder="Campaign title *"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <input value={rwForm.tier} onChange={(e) => setRwForm({ ...rwForm, tier: e.target.value })}
+                    placeholder="Tier (e.g. Gold)"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <input value={rwForm.category} onChange={(e) => setRwForm({ ...rwForm, category: e.target.value })}
+                    placeholder="Category (e.g. Trip)"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <input value={rwForm.target_label} onChange={(e) => setRwForm({ ...rwForm, target_label: e.target.value })}
+                    placeholder="Target (e.g. 12 closings)"
+                    className="h-10 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+                  <select value={rwForm.country} onChange={(e) => setRwForm({ ...rwForm, country: e.target.value })}
+                    aria-label="Country"
+                    className="h-10 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+                    <option value="MY">🇲🇾 Malaysia</option>
+                    <option value="ID">🇮🇩 Indonesia</option>
+                  </select>
+                  <label className="flex h-10 cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface2 px-3 text-xs font-bold text-muted hover:text-ink">
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                      onChange={(e) => setRwPoster(e.target.files?.[0] ?? null)} />
+                    🖼 {rwPoster ? rwPoster.name.slice(0, 22) : 'Poster (optional)'}
+                  </label>
+                  <button type="button" disabled={rwBusy || !rwForm.title.trim()}
+                    onClick={() => rwSave(async () => {
+                      /* poster first, row second — a row pointing at a failed upload
+                         would show agents a broken image forever */
+                      let posterPath: string | null = null
+                      if (rwPoster) {
+                        const ext = rwPoster.name.split('.').pop()?.toLowerCase() ?? 'png'
+                        const key = `${rwForm.country}/${Date.now()}-${rwForm.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}.${ext}`
+                        const up = await supabase!.storage.from('rewards').upload(key, rwPoster,
+                          { contentType: rwPoster.type, upsert: false })
+                        if (up.error) return { error: up.error }
+                        posterPath = supabase!.storage.from('rewards').getPublicUrl(key).data.publicUrl
+                      }
+                      return await supabase!.from('rewards').insert({
+                        title: rwForm.title.trim(),
+                        tier: rwForm.tier.trim() || null,
+                        category: rwForm.category.trim() || null,
+                        target_label: rwForm.target_label.trim() || null,
+                        poster_path: posterPath,
+                        country: rwForm.country, active: true, sort: rw.length,
+                      })
+                    }, 'Campaign published').then(() => { setRwForm({ ...rwForm, title: '', tier: '', category: '', target_label: '' }); setRwPoster(null) })}
+                    className="h-10 cursor-pointer rounded-xl bg-accent px-5 text-xs font-extrabold text-on-accent disabled:opacity-40">
+                    + Publish
+                  </button>
+                </div>
+              </Card>
+
+              <Card className="max-w-3xl overflow-x-auto">
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead><tr className="border-b border-border text-left text-[10px] uppercase tracking-wider text-muted"><th className="px-4 py-3">Campaign</th><th className="px-4 py-3">Tier</th><th className="px-4 py-3">Country</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Status</th><th /></tr></thead>
+                  <tbody>
+                    {rw.filter((r) => team === 'ALL' || r.country === team).map((r) => (
+                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-surface2/50">
+                        <td className="px-4 py-3 font-semibold">
+                          <div className="flex items-center gap-2.5">
+                            {r.poster_path && (
+                              <img src={r.poster_path} alt="" className="h-9 w-9 rounded-lg border border-border object-cover" />
+                            )}
+                            {r.title}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">{r.tier ? <Chip tone="accent">{r.tier}</Chip> : <span className="text-muted">—</span>}</td>
+                        <td className="px-4 py-3">{r.country === 'MY' ? '🇲🇾' : '🇮🇩'}</td>
+                        <td className="px-4 py-3 text-xs">{r.target_label ?? '—'}</td>
+                        <td className="px-4 py-3">
+                          <button type="button" disabled={rwBusy}
+                            onClick={() => rwSave(async () => await supabase!.from('rewards')
+                              .update({ active: !r.active }).eq('id', r.id), r.active ? 'Campaign paused' : 'Campaign live')}
+                            className="cursor-pointer">
+                            <Chip tone={r.active ? 'success' : 'default'}>{r.active ? 'active' : 'draft'}</Chip>
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button type="button" disabled={rwBusy}
+                            onClick={() => { if (confirm(`Delete "${r.title}"?`))
+                              rwSave(async () => await supabase!.from('rewards').delete().eq('id', r.id), 'Campaign deleted') }}
+                            className="cursor-pointer text-[11px] font-bold text-danger">Delete</button>
+                        </td>
+                      </tr>
+                    ))}
+                    {rw.length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-muted">
+                        No campaigns yet. Publish one above and it appears on every agent's Grow screen.
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+                <p className="p-4 text-[11px] text-muted">Country-scoped — Indonesia gets its own campaigns.</p>
+              </Card>
+            </>
           )}
 
-          {/* ============ COUNTRY SETTINGS ============ */}
           {section === 'settings' && (
             <>
             {/* Brand Studio — uploadable logos & mascots */}
@@ -1474,24 +2586,7 @@ export default function Admin() {
 
             <div className="grid gap-4 xl:grid-cols-2">
               {(['MY', 'ID'] as const).map((c) => (
-                <Card key={c} className="p-5">
-                  <p className="mb-4 font-display text-sm font-extrabold">{c === 'MY' ? '🇲🇾 Malaysia' : '🇮🇩 Indonesia'}</p>
-                  {([
-                    ['Currency', c === 'MY' ? 'RM (MYR)' : 'Rp (IDR)'],
-                    ['Tax', c === 'MY' ? 'SST 8%' : 'PPN 11%'],
-                    ['Default language', c === 'MY' ? 'English (BM optional)' : 'Bahasa Indonesia'],
-                    ['Phone prefix', c === 'MY' ? '+60' : '+62'],
-                    ['Timezone', c === 'MY' ? 'Asia/Kuala_Lumpur' : 'Asia/Jakarta'],
-                    ['GHL account', c === 'MY' ? 'Location ····8842 · connected' : 'Location ····3317 · connected'],
-                    ['M4U webhook', 'active · secret set'],
-                  ] as [string, string][]).map(([k, v]) => (
-                    <div key={k} className="flex items-center justify-between border-b border-border py-2.5 text-sm last:border-0">
-                      <span className="text-muted">{k}</span>
-                      <span className="font-semibold">{v}</span>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => say(`${c} settings editor (full build phase — fixes the ID currency bug permanently)`)} className="mt-4 w-full cursor-pointer rounded-xl border border-border py-2.5 text-xs font-bold text-muted transition-colors hover:border-accent/60 hover:text-ink">Edit {c} settings</button>
-                </Card>
+                <CountrySettingsCard key={c} c={c} onSaved={say} />
               ))}
             </div>
             </>
