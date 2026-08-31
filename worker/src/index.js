@@ -21,6 +21,7 @@ import { handleEventsNotify, sweepNoShows } from './events.js'
 import { handleKamalagSessions } from './kamalagSessions.js'
 import { handleCertRender, handleCertPdf, handleCertPreview, handleCertSend, processCertEmails } from './certificates.js'
 import { handlePosterCaption, handlePosterSend, handleTelegramChats, handleTelegramTest } from './poster.js'
+import { handleProjectDoc } from './projectDocs.js'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -825,6 +826,7 @@ export default {
     if (url.pathname === '/poster/send') return handlePosterSend(request, env)
     if (url.pathname === '/poster/telegram/chats') return handleTelegramChats(request, env)
     if (url.pathname === '/poster/telegram/test') return handleTelegramTest(request, env)
+    if (url.pathname === '/project-doc') return handleProjectDoc(request, env)
     if (url.pathname === '/cert/preview') return handleCertPreview(request, env, corsHeaders)
     if (url.pathname === '/cert/pdf') return handleCertPdf(request, env)
     if (url.pathname === '/sweep') {

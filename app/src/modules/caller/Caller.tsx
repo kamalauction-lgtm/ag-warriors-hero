@@ -660,6 +660,14 @@ export default function Caller() {
       {/* ---------------- PROJECTS (with self-request) ---------------- */}
       {tab === 'projects' && !lead && (
         <>
+          <a href="/library"
+            className="mb-3 flex items-center gap-3 rounded-xl border border-accent/50 bg-accent-soft p-3.5 no-underline">
+            <BookOpen size={18} className="text-accent" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold text-accent">{L('Project Library', 'Perpustakaan Projek', 'Perpustakaan Proyek')}</p>
+              <p className="text-[11px] text-muted">{L('Documents, links & instructions for every project', 'Dokumen, pautan & arahan untuk setiap projek', 'Dokumen, tautan & instruksi untuk tiap proyek')}</p>
+            </div>
+          </a>
           <SectionTitle>{L('My projects', 'Projek saya', 'Proyek saya')}</SectionTitle>
           {projects.length === 0 && <Card className="mb-3 p-5 text-center text-xs text-muted">
             {L('No projects yet — request one below.', 'Belum ada projek — mohon di bawah.', 'Belum ada proyek — ajukan di bawah.')}

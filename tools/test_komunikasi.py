@@ -179,9 +179,11 @@ finally:
             call(f"/comms_reads?channel_id=eq.{row['channel_id']}", "DELETE", headers=svc)
             call(f"/comms_channels?id=eq.{row['channel_id']}", "DELETE", headers=svc)
     if pod_id:
-        # the squad channel for this pod
-        call(f"/comms_messages?channel_id=in.(select id from comms_channels where pod_id=eq.{pod_id})", "DELETE", headers=svc)
-        call(f"/comms_channels?pod_id=eq.{pod_id}", "DELETE", headers=svc)
+        s, sc = call(f"/comms_channels?pod_id=eq.{pod_id}&select=id", headers=svc)
+        for row in (sc if isinstance(sc, list) else []):
+            call(f"/comms_messages?channel_id=eq.{row['id']}", "DELETE", headers=svc)
+            call(f"/comms_reads?channel_id=eq.{row['id']}", "DELETE", headers=svc)
+            call(f"/comms_channels?id=eq.{row['id']}", "DELETE", headers=svc)
         call(f"/pod_members?pod_id=eq.{pod_id}", "DELETE", headers=svc)
         call(f"/pods?id=eq.{pod_id}", "DELETE", headers=svc)
     for uid in users:

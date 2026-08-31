@@ -1,7 +1,7 @@
 /* Caller admin — configuration tabs (spec §9): Projects, Pipelines, Fields,
    Quotes and the BOP funnel. All live data; writes go through PostgREST under
    the admin RLS policies. */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { Card, Chip } from '../../components/ui'
 
@@ -36,6 +36,7 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
   const [grants, setGrants] = useState<Grant[]>([])
   const [pending, setPending] = useState<Pending[]>([])
   const [declining, setDeclining] = useState<string | null>(null)
+  const [docsFor, setDocsFor] = useState<number | null>(null)
   const [declineWhy, setDeclineWhy] = useState('')
   const [callCounts, setCallCounts] = useState<Record<string, number>>({})
   const [openAgent, setOpenAgent] = useState<string | null>(null)
@@ -266,7 +267,7 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
 
   if (tab === 'projects') return (
     <>
-      <p className="mb-3 text-xs text-muted">Projects drive which disposition set an agent sees — property or recruitment.</p>
+      <p className="mb-3 text-xs text-muted">Projects drive which disposition set an agent sees — property or recruitment. “Docs” opens the Project Library for that project: files, links and instructions agents can read.</p>
       {props.map((p) => (
         <Card key={p.id} className="mb-2 flex flex-wrap items-center gap-2 p-3.5">
           <span className="text-sm font-bold">{p.country === 'ID' ? '🇮🇩' : '🇲🇾'} {p.name}</span>
@@ -280,6 +281,15 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
             className="h-9 cursor-pointer rounded-xl border border-border bg-surface px-2 text-xs outline-none">
             {['property', 'recruitment', 'other'].map((t) => <option key={t}>{t}</option>)}
           </select>
+          <button type="button" onClick={() => setDocsFor(docsFor === p.id ? null : p.id)}
+            className="h-9 cursor-pointer rounded-xl border border-accent/60 px-3 text-xs font-bold text-accent">
+            {docsFor === p.id ? 'Close docs' : '📁 Docs'}
+          </button>
+          {docsFor === p.id && (
+            <div className="mt-2 w-full border-t border-border pt-3">
+              <ProjectDocs propertyId={p.id} country={p.country} onToast={onToast} />
+            </div>
+          )}
         </Card>
       ))}
     </>
@@ -584,5 +594,107 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
         )
       })}
     </>
+  )
+}
+
+/* ---------------------------------------------------------------------------
+   Project Docs (100) — the admin curation panel for one project's library.
+   Files upload to the private project-docs bucket (admin storage policy),
+   then register via fn_admin_set_project_resource. Agents read them in the
+   Project Library page; a file downloads through the worker's signed URL.
+--------------------------------------------------------------------------- */
+function ProjectDocs({ propertyId, country, onToast }:
+  { propertyId: number; country: string; onToast: (m: string) => void }) {
+  const [rows, setRows] = useState<{ id: string; kind: string; title: string; description: string | null
+    url: string | null; body: string | null; file_type: string | null; file_size: number | null; visibility: string }[]>([])
+  const [form, setForm] = useState({ kind: 'note', title: '', body: '', url: '', visibility: 'all' })
+  const [file, setFile] = useState<File | null>(null)
+  const [busy, setBusy] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const load = useCallback(async () => {
+    if (!supabase) return
+    const { data } = await supabase.rpc('fn_project_resources', { p_property: propertyId })
+    setRows((data as typeof rows) ?? [])
+  }, [propertyId])
+  useEffect(() => { load() }, [load])
+
+  const add = async () => {
+    if (!supabase || !form.title.trim()) return
+    setBusy(true)
+    try {
+      let storage_path: string | null = null, file_type: string | null = null, file_size: number | null = null
+      if (form.kind === 'file') {
+        if (!file) { onToast('Choose a file first'); setBusy(false); return }
+        const path = `${country}/${propertyId}/${Date.now()}-${file.name.replace(/[^\w.-]/g, '_')}`
+        const up = await supabase.storage.from('project-docs').upload(path, file, { upsert: false })
+        if (up.error) { onToast('⚠ upload: ' + up.error.message); setBusy(false); return }
+        storage_path = path; file_type = file.type || 'application/octet-stream'; file_size = file.size
+      }
+      const { error } = await supabase.rpc('fn_admin_set_project_resource', {
+        p_id: null, p_property: propertyId, p_kind: form.kind, p_title: form.title.trim(),
+        p_description: null, p_storage_path: storage_path, p_file_type: file_type, p_file_size: file_size,
+        p_url: form.kind === 'link' ? form.url.trim() : null,
+        p_body: form.kind === 'note' ? form.body.trim() : null,
+        p_visibility: form.visibility, p_sort: rows.length,
+      })
+      if (error) { onToast('⚠ ' + error.message); setBusy(false); return }
+      onToast('Added to library'); setForm({ kind: form.kind, title: '', body: '', url: '', visibility: form.visibility })
+      setFile(null); if (fileRef.current) fileRef.current.value = ''; load()
+    } finally { setBusy(false) }
+  }
+
+  const del = async (id: string, path: string | null) => {
+    if (!supabase || !window.confirm('Delete this item?')) return
+    setBusy(true)
+    const { data, error } = await supabase.rpc('fn_admin_delete_project_resource', { p_id: id })
+    if (!error && (data as { storage_path?: string })?.storage_path) {
+      await supabase.storage.from('project-docs').remove([(data as { storage_path: string }).storage_path])
+    } else if (path) { await supabase.storage.from('project-docs').remove([path]) }
+    setBusy(false)
+    if (error) { onToast('⚠ ' + error.message); return }
+    onToast('Removed'); load()
+  }
+
+  const inp = 'h-9 rounded-lg border border-border bg-surface px-2.5 text-xs outline-none focus:border-accent'
+  return (
+    <div>
+      {rows.map((r) => (
+        <div key={r.id} className="mb-1.5 flex flex-wrap items-center gap-2 rounded-lg border border-border p-2 text-xs">
+          <span>{r.kind === 'file' ? '📄' : r.kind === 'link' ? '🔗' : '📝'}</span>
+          <span className="font-bold">{r.title}</span>
+          {r.visibility === 'granted' && <Chip tone="warning">approved only</Chip>}
+          <span className="flex-1" />
+          <button type="button" disabled={busy} onClick={() => del(r.id, r.file_type ? null : null)}
+            className="cursor-pointer rounded-full border border-danger/50 px-2.5 py-1 text-[10px] font-bold text-danger">Delete</button>
+        </div>
+      ))}
+      {rows.length === 0 && <p className="mb-2 text-[11px] text-muted">No materials yet — add the first below.</p>}
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} aria-label="Kind" className={`${inp} cursor-pointer`}>
+          <option value="note">📝 Instruction</option><option value="link">🔗 Link</option><option value="file">📄 File</option>
+        </select>
+        <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Title" className={`${inp} min-w-[140px] flex-1`} />
+        <select value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value })} aria-label="Who" className={`${inp} cursor-pointer`}>
+          <option value="all">All agents</option><option value="granted">Approved only</option>
+        </select>
+      </div>
+      {form.kind === 'note' && (
+        <textarea value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} rows={2}
+          placeholder="Instructions agents will read…" className="mt-2 w-full rounded-lg border border-border bg-surface px-2.5 py-2 text-xs outline-none focus:border-accent" />
+      )}
+      {form.kind === 'link' && (
+        <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })} placeholder="https://…" className={`${inp} mt-2 w-full`} />
+      )}
+      {form.kind === 'file' && (
+        <input ref={fileRef} type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          className="mt-2 w-full text-xs file:mr-2 file:rounded-lg file:border-0 file:bg-accent-soft file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-accent" />
+      )}
+      <button type="button" disabled={busy || !form.title.trim()} onClick={add}
+        className="mt-2 h-9 cursor-pointer rounded-lg bg-accent px-4 text-xs font-extrabold text-on-accent disabled:opacity-40">
+        {busy ? 'Saving…' : '+ Add to library'}
+      </button>
+    </div>
   )
 }

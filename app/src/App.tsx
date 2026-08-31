@@ -11,6 +11,7 @@ import Career from './pages/Career'
 import Leads from './pages/Leads'
 import Team from './pages/Team'
 import Komunikasi from './pages/Komunikasi'
+import ProjectLibrary from './pages/ProjectLibrary'
 import Elite from './pages/Elite'
 import Poster from './pages/Poster'
 import Grow from './pages/Grow'
@@ -123,6 +124,7 @@ export default function App() {
         <Route path="/leads" element={<Leads />} />
         <Route path="/team" element={<Team />} />
         <Route path="/komunikasi" element={<Komunikasi />} />
+        <Route path="/library" element={<ProjectLibrary />} />
         <Route path="/team/career" element={<Career />} />
         <Route
           path="/team/elite"
