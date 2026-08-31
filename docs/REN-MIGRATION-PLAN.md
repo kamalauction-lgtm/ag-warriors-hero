@@ -23,7 +23,7 @@ DECIDED:
 - EXSIM jsPDF doc generator → DROPPED (28 Aug, Kamal). Not ported. If a project
   needs a booking form, an admin uploads the template into the Project Library
   instead of a code generator.
-- M10 Project Support → still open: does Hero's Help Request cover it?
+- M10 Project Support → DROPPED (28 Aug, Kamal). Hero's Help Request stands in.
 
 RETIRE: old push/notifications/must-see (Hero 064 + templates supersede).
 
@@ -43,13 +43,15 @@ A. **Data safety** — Kamal zips data/ from BOTH sites → kamal\ren-final-back
    before this says CLEAR.
 B. **Komunikasi in Hero** — scope decision, then build (Supabase+RLS, no PHP).
 C. **The three "decide" modules** — yes/no each, build survivors.
-D. **Delete hosting** — only after A CLEAR + Komunikasi live + ~30 days of
-   redirect + final scan CLEAN. Rotate credentials until deletion day.
+D. **Delete hosting** — now unblocked. Recommended: let the redirect run a
+   few weeks so installed PWAs fetch the self-destruct SW at least once, then
+   delete both sites. Deleting the hosting also ends the attacker's write
+   access, so it doubles as the credential fix.
 
 ## Kamal's five decisions
 
-1. Komunikasi: lean v1 or full port?
+1. Komunikasi: BUILT (lean v1, 099, 22/22 tests).
 2. M4 Projects library: BUILT — migration 100, live.
 3. EXSIM doc generator: DROPPED (Kamal, 28 Aug) — not ported.
-4. M10 support: does Help Request cover it?
-5. Old call logs/booth leads: import or archive-and-let-go?
+4. M10 support: DROPPED — Help Request stands in.
+5. Old data: DROPPED — redone fresh, nothing imported.
