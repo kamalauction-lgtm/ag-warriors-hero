@@ -1,17 +1,26 @@
 /* Hero Talent Compass — participant journey (spec §2).
    Public route: no login. Access is an event code, and the returned token is
    kept in localStorage so a refresh never loses progress.
+   The same journey serves /myself, which passes a fixed code so the public
+   pre-programme link opens straight into a welcome screen instead of a keypad.
    Mobile-first: one question per card, thumb-reachable options. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { TL, type TLang } from './talentText'
 import TalentReport from './TalentReport'
 
-const TOKEN_KEY = 'hero-testme-token'
-// A finished attempt keeps its token under a separate key so the participant can
-// close the page and come back to their report. Clearing it on submit meant a
-// refresh on the report screen lost it for good.
-const REPORT_KEY = 'hero-testme-report'
+/* Storage is namespaced per assessment. Both routes render this same component,
+   so a single shared key meant that finishing /myself and then opening /testme
+   resumed the /myself attempt and showed its report — the two assessments were
+   standing on each other's session. /testme keeps the original key so existing
+   sessions survive; /myself gets its own. */
+const keysFor = (code?: string) => {
+  // /testme moves to its own namespace too: leaving it on the legacy key meant it
+  // still adopted /myself sittings, which is the bug this is meant to end.
+  const ns = code ? code.toLowerCase() : 'testme-v1'
+  return { token: `hero-${ns}-token`, report: `hero-${ns}-report` }
+}
+const LEGACY = { token: 'hero-testme-token', report: 'hero-testme-report' }
 
 interface Option { value: number; label: string }
 interface Question {
@@ -37,15 +46,18 @@ function shuffled<T>(arr: T[], seed: number): T[] {
 /* Defined at module scope on purpose. A component declared INSIDE TestMe gets a
    new identity on every render, so React unmounts and remounts the whole tree
    each keystroke — which is what made the text cursor jump out of the field. */
-function Shell({ eventName, children }: { eventName: string; children: React.ReactNode }) {
+function Shell({ eventName, children, brandTitle, brandSub }: {
+  eventName: string; children: React.ReactNode
+  brandTitle?: React.ReactNode; brandSub?: string
+}) {
   return (
     <div className="min-h-dvh bg-bg px-4 py-6">
       <div className="mx-auto w-full max-w-lg">
         <header className="mb-5 text-center">
           <h1 className="font-display text-xl font-extrabold tracking-tight">
-            Hero <span className="gold-text">Talent Compass</span>
+            {brandTitle ?? <>Hero <span className="gold-text">Talent Compass</span></>}
           </h1>
-          <p className="text-[11px] text-muted">{eventName || 'IQI AG Hero'}</p>
+          <p className="text-[11px] text-muted">{brandSub ?? eventName ?? 'IQI AG Hero'}</p>
         </header>
         {children}
       </div>
@@ -53,7 +65,14 @@ function Shell({ eventName, children }: { eventName: string; children: React.Rea
   )
 }
 
-export default function TestMe() {
+/* fixedCode: skip the event-code keypad and start that event directly.
+   brandTitle/brandSub: /myself is a different front door to the same journey. */
+export default function TestMe({ fixedCode, brandTitle, brandSub, blurb, note }: {
+  fixedCode?: string; brandTitle?: React.ReactNode; brandSub?: string
+  // per-language so the public front door stays trilingual like the rest
+  blurb?: Partial<Record<TLang, string>>; note?: Partial<Record<TLang, string>>
+} = {}) {
+  const KEY = keysFor(fixedCode)
   const [lang, setLang] = useState<TLang>('en')
   const [stage, setStage] = useState<Stage>('code')
   const [token, setToken] = useState<string | null>(null)
@@ -80,18 +99,43 @@ export default function TestMe() {
 
   /* ---------- resume an existing attempt ---------- */
   useEffect(() => {
-    const finished = localStorage.getItem(REPORT_KEY)
+    /* One-time rescue: sittings from before the keys were namespaced all live
+       under the shared legacy key. Each route adopts it only if the bank matches
+       — myself-v1 is the bank with a section G, v1 stops at F, so the form
+       identifies itself. A mismatch is left alone for the other route to claim,
+       and a dead token is simply cleared. */
+    ;(async () => {
+      if (!supabase) return
+      if (localStorage.getItem(KEY.report) || localStorage.getItem(KEY.token)) return
+      const legacy = localStorage.getItem(LEGACY.report) ?? localStorage.getItem(LEGACY.token)
+      if (!legacy) return
+      const { data } = await supabase.rpc('talent_form', { p_token: legacy })
+      const f = data as { status: string; sections: { code: string }[] } | null
+      if (!f) {                                   // stale token, help nobody by keeping it
+        localStorage.removeItem(LEGACY.report); localStorage.removeItem(LEGACY.token); return
+      }
+      const isMyself = !!f.sections?.some((x) => x.code === 'G')
+      if (isMyself !== !!fixedCode) return         // belongs to the other route
+      localStorage.setItem(f.status === 'in_progress' ? KEY.token : KEY.report, legacy)
+      localStorage.removeItem(LEGACY.report)
+      localStorage.removeItem(LEGACY.token)
+      if (f.status !== 'in_progress') { setToken(legacy); setStage('done') }
+    })()
+  }, [fixedCode, KEY.report, KEY.token])
+
+  useEffect(() => {
+    const finished = localStorage.getItem(KEY.report)
     if (finished) { setToken(finished); setStage('done'); return }
-    const saved = localStorage.getItem(TOKEN_KEY)
+    const saved = localStorage.getItem(KEY.token)
     if (!saved || !supabase) return
     ;(async () => {
       const { data: form, error } = await supabase.rpc('talent_form', { p_token: saved })
-      if (error || !form) { localStorage.removeItem(TOKEN_KEY); return }
+      if (error || !form) { localStorage.removeItem(KEY.token); return }
       const f = form as { language: TLang; status: string; sections: Section[] }
       if (f.status !== 'in_progress') {
         // already submitted — show the report rather than a dead end
-        localStorage.removeItem(TOKEN_KEY)
-        localStorage.setItem(REPORT_KEY, saved)
+        localStorage.removeItem(KEY.token)
+        localStorage.setItem(KEY.report, saved)
         setToken(saved); setLang(f.language); setStage('done')
         return
       }
@@ -119,9 +163,10 @@ export default function TestMe() {
   const enterCode = async () => {
     setBusy(true); setErr('')
     try {
-      const res = await call('talent_start', { p_code: code.trim(), p_language: lang }) as
+      const useCode = (fixedCode ?? code).trim()
+      const res = await call('talent_start', { p_code: useCode, p_language: lang }) as
         { token: string; event_name: string }
-      localStorage.setItem(TOKEN_KEY, res.token)
+      localStorage.setItem(KEY.token, res.token)
       setToken(res.token); setEventName(res.event_name)
       const form = await call('talent_form', { p_token: res.token }) as { sections: Section[] }
       setSections(form.sections)
@@ -140,7 +185,10 @@ export default function TestMe() {
         p_country: details.country, p_contact: details.contact,
         p_experience: details.experience, p_leadership: details.leadership,
         p_developmental: details.ack1, p_not_clinical: details.ack2,
-        p_self_reported: details.ack3, p_data_use: details.ack4, p_sharing: details.sharing,
+        /* sharing is always 'full' — results are recorded for the facilitator
+           and the AI coach reads them to advise accordingly (Kamal, 2026-08-07).
+           The data-use acknowledgement above states this to the participant. */
+        p_self_reported: details.ack3, p_data_use: details.ack4, p_sharing: 'full',
       })
       setStage('assessment')
     } catch (e) { setErr((e as Error).message) }
@@ -164,17 +212,38 @@ export default function TestMe() {
       const secs = Math.round((Date.now() - startedAt.current) / 1000)
       await call('talent_submit', { p_token: token, p_seconds: secs })
       await call('talent_score_mine', { p_token: token })
-      localStorage.removeItem(TOKEN_KEY)
-      localStorage.setItem(REPORT_KEY, token!)
+      localStorage.removeItem(KEY.token)
+      localStorage.setItem(KEY.report, token!)
       setStage('done')
     } catch (e) { setErr((e as Error).message) }
     setBusy(false)
   }
 
+  /* Switching language re-renders the SAME questions in the new wording.
+     Answers are stored as question_id + option_value, both language-independent,
+     so nothing is lost and nothing is re-asked. Only allowed while in progress. */
+  const changeLang = async (l: TLang) => {
+    if (l === lang) return
+    const previous = lang
+    setLang(l)
+    if (!token) return                      // not started yet: nothing server-side to update
+    try {
+      await call('talent_set_language', { p_token: token, p_language: l })
+      const form = await call('talent_form', { p_token: token }) as { sections: Section[] }
+      setSections(form.sections)
+      setErr('')
+    } catch (e) {
+      // put the chrome back rather than leave half the screen in the new
+      // language and the questions still in the old one
+      setLang(previous)
+      setErr((e as Error).message)
+    }
+  }
+
   const langPicker = (
     <div className="mb-4 flex justify-center gap-1.5">
       {(['ms-MY', 'en', 'id-ID'] as TLang[]).map((l) => (
-        <button key={l} type="button" onClick={() => setLang(l)}
+        <button key={l} type="button" onClick={() => changeLang(l)}
           className={`cursor-pointer rounded-full border px-3.5 py-2 text-xs font-bold ${
             lang === l ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted'}`}>
           {l === 'ms-MY' ? 'Bahasa Melayu' : l === 'id-ID' ? 'Bahasa Indonesia' : 'English'}
@@ -183,23 +252,43 @@ export default function TestMe() {
     </div>
   )
 
+  /* Compact version for the stages where a full row of names would crowd the
+     card. Same behaviour, three-letter labels. */
+  const langSwitch = (
+    <div className="mb-3 flex justify-end gap-1">
+      {(['ms-MY', 'en', 'id-ID'] as TLang[]).map((l) => (
+        <button key={l} type="button" onClick={() => changeLang(l)}
+          aria-label={l === 'ms-MY' ? 'Bahasa Melayu' : l === 'id-ID' ? 'Bahasa Indonesia' : 'English'}
+          className={`cursor-pointer rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+            lang === l ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted'}`}>
+          {l === 'ms-MY' ? 'BM' : l === 'id-ID' ? 'ID' : 'EN'}
+        </button>
+      ))}
+    </div>
+  )
+
   /* ---------------- stage: code ---------------- */
   if (stage === 'code') return (
-    <Shell eventName={eventName}>
+    <Shell eventName={eventName} brandTitle={brandTitle} brandSub={brandSub}>
       {langPicker}
       <div className="rounded-2xl border border-border bg-surface p-5">
         <p className="mb-1 text-sm font-bold">{t.welcome}</p>
-        <p className="mb-4 text-xs text-muted">{t.welcomeBody}</p>
-        <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted">{t.eventCode}</label>
-        <input value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters"
-          placeholder="AGLEADERSHIP"
-          className="mb-3 h-12 w-full rounded-xl border border-border bg-surface2 px-3 text-center text-base font-bold tracking-widest outline-none focus:border-accent" />
+        <p className="mb-4 text-xs text-muted">{blurb?.[lang] ?? t.welcomeBody}</p>
+        {!fixedCode && <>
+          <label className="mb-1 block text-[11px] font-bold uppercase tracking-wide text-muted">{t.eventCode}</label>
+          <input value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters"
+            placeholder="AGLEADERSHIP"
+            className="mb-3 h-12 w-full rounded-xl border border-border bg-surface2 px-3 text-center text-base font-bold tracking-widest outline-none focus:border-accent" />
+        </>}
         {err && <p className="mb-2 rounded-lg bg-danger/10 p-2 text-xs text-danger">{err}</p>}
-        <button type="button" disabled={busy || !code.trim()} onClick={enterCode}
+        <button type="button" disabled={busy || (!fixedCode && !code.trim())} onClick={enterCode}
           className="h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">
           {busy ? '…' : t.start}
         </button>
         <p className="mt-3 text-center text-[10px] leading-relaxed text-muted">{t.timeNote}</p>
+        {note?.[lang] && (
+          <p className="mt-2 rounded-lg bg-surface2 p-2 text-center text-[10px] leading-relaxed text-muted">{note[lang]}</p>
+        )}
       </div>
     </Shell>
   )
@@ -207,15 +296,22 @@ export default function TestMe() {
   /* ---------------- stage: details + consent ---------------- */
   if (stage === 'details') {
     const acksOk = details.ack1 && details.ack2 && details.ack3 && details.ack4
-    const ready = details.full_name.trim() && details.experience && details.leadership && acksOk
+    // email identifies the person across sittings (pre-programme and mid-class),
+    // so it is required rather than optional. Kept permissive on purpose.
+    const emailOk = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(details.contact.trim())
+    const ready = details.full_name.trim() && emailOk && details.experience && details.leadership && acksOk
     return (
-      <Shell eventName={eventName}>
+      <Shell eventName={eventName} brandTitle={brandTitle} brandSub={brandSub}>
+        {langSwitch}
         <div className="rounded-2xl border border-border bg-surface p-5">
           <p className="mb-3 text-sm font-bold">{t.aboutYou}</p>
           {([['full_name', t.fullName], ['preferred', t.preferredName], ['contact', t.contact]] as const).map(([k, label]) => (
             <label key={k} className="mb-2 block">
               <span className="text-[11px] font-bold uppercase tracking-wide text-muted">{label}</span>
               <input value={details[k]} onChange={(e) => setDetails({ ...details, [k]: e.target.value })}
+                type={k === 'contact' ? 'email' : 'text'}
+                autoComplete={k === 'contact' ? 'email' : undefined}
+                inputMode={k === 'contact' ? 'email' : undefined}
                 className="mt-1 h-11 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
             </label>
           ))}
@@ -251,15 +347,15 @@ export default function TestMe() {
             </label>
           ))}
 
-          <p className="mb-2 mt-4 text-sm font-bold">{t.sharingTitle}</p>
-          {([['private', t.sharePrivate], ['summary', t.shareSummary], ['full', t.shareFull]] as const).map(([v, label]) => (
-            <label key={v} className="mb-1.5 flex cursor-pointer items-start gap-2 text-xs">
-              <input type="radio" name="sharing" checked={details.sharing === v}
-                onChange={() => setDetails({ ...details, sharing: v })}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
-              <span>{label}</span>
-            </label>
-          ))}
+          {/* no sharing choice: results go to the programme team + AI coach in
+              full, and the line below says so plainly */}
+          <p className="mb-1 mt-3 rounded-lg bg-surface2 p-2.5 text-[10px] leading-relaxed text-muted">
+            {lang === 'ms-MY'
+              ? 'Keputusan penuh anda dikongsi dengan pasukan program dan AI coach untuk bimbingan peribadi anda.'
+              : lang === 'id-ID'
+              ? 'Hasil lengkap Anda dibagikan kepada tim program dan AI coach untuk bimbingan pribadi Anda.'
+              : 'Your full results are shared with the programme team and the AI coach for your personal guidance.'}
+          </p>
 
           {err && <p className="mt-2 rounded-lg bg-danger/10 p-2 text-xs text-danger">{err}</p>}
           <button type="button" disabled={busy || !ready} onClick={saveDetails}
@@ -281,7 +377,8 @@ export default function TestMe() {
     const canNext = !current.required || a.value !== undefined || (a.text ?? '').trim() !== ''
 
     return (
-      <Shell eventName={eventName}>
+      <Shell eventName={eventName} brandTitle={brandTitle} brandSub={brandSub}>
+        {langSwitch}
         <div className="mb-3">
           <div className="mb-1 flex justify-between text-[11px] text-muted">
             <span>{current.section.title}</span>
@@ -347,7 +444,8 @@ export default function TestMe() {
     const missing = flat.filter((q) => q.required && answers[q.id]?.value === undefined
       && (answers[q.id]?.text ?? '').trim() === '')
     return (
-      <Shell eventName={eventName}>
+      <Shell eventName={eventName} brandTitle={brandTitle} brandSub={brandSub}>
+        {langSwitch}
         <div className="rounded-2xl border border-border bg-surface p-5">
           <p className="mb-2 text-sm font-bold">{t.reviewTitle}</p>
           <p className="mb-4 text-xs text-muted">
@@ -378,8 +476,9 @@ export default function TestMe() {
 
   /* ---------------- stage: done — the report itself ---------------- */
   return (
-    <Shell eventName={eventName}>
-      <TalentReport token={token ?? ''} name={details.preferred || details.full_name} />
+    <Shell eventName={eventName} brandTitle={brandTitle} brandSub={brandSub}>
+      <TalentReport token={token ?? ''} name={details.preferred || details.full_name}
+        onLangChange={setLang} />
     </Shell>
   )
 }

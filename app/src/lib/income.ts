@@ -1,6 +1,8 @@
 /* Income Engine — 1:1 port of production income-calc.js (see docs/SPEC-INCOME-SUBSALE.md).
-   All constants admin-editable per country (prototype: localStorage; build: Supabase). */
-import { useSyncExternalStore } from 'react'
+   All constants admin-editable per country. Source of truth: income_rules (061);
+   localStorage is only the sync cache the hooks subscribe to. */
+import { useEffect, useSyncExternalStore } from 'react'
+import { supabase } from './supabase'
 import type { Country } from './types'
 
 export interface LadderRow { name: string; target: number; addon: number }
@@ -150,15 +152,38 @@ export function getIncomeCfg(c: Country): IncomeCfg {
   } catch { /* default */ }
   return DEFAULTS[c]
 }
-export function setIncomeCfg(c: Country, cfg: IncomeCfg) {
+
+/* admin save: DB first (RLS enforces who may), cache after. Returns an error
+   message or null so the editor can toast honestly instead of "live everywhere". */
+export async function setIncomeCfg(c: Country, cfg: IncomeCfg): Promise<string | null> {
+  if (supabase) {
+    const { error } = await supabase.from('income_rules')
+      .upsert({ country: c, cfg, updated_at: new Date().toISOString() })
+    if (error) return error.message
+  }
+  try { localStorage.setItem(key(c), JSON.stringify(cfg)) } catch { /* ignore */ }
+  window.dispatchEvent(new Event('agw-income'))
+  return null
+}
+
+/* pull the country's rules from DB into the cache — once per country per load */
+const pulled: Partial<Record<Country, boolean>> = {}
+async function pullIncomeCfg(c: Country) {
+  if (pulled[c] || !supabase) return
+  pulled[c] = true
+  const { data } = await supabase.from('income_rules').select('cfg').eq('country', c).maybeSingle()
+  const cfg = (data as { cfg: Partial<IncomeCfg> } | null)?.cfg
+  if (!cfg) return
   try { localStorage.setItem(key(c), JSON.stringify(cfg)) } catch { /* ignore */ }
   window.dispatchEvent(new Event('agw-income'))
 }
+
 const sub = (cb: () => void) => {
   window.addEventListener('agw-income', cb)
   return () => window.removeEventListener('agw-income', cb)
 }
 export function useIncomeCfg(c: Country): IncomeCfg {
+  useEffect(() => { pullIncomeCfg(c) }, [c])
   const raw = useSyncExternalStore(sub, () => {
     try { return localStorage.getItem(key(c)) } catch { return null }
   })

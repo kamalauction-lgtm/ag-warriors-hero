@@ -8,6 +8,9 @@ import clsx from 'clsx'
 import { useApp } from '../../lib/store'
 import { supabase, supabaseReady } from '../../lib/supabase'
 import { Bar, Card, Chip, SectionTitle } from '../../components/ui'
+import Today from './Today'
+import QuickLog from './QuickLog'
+import Progress from './Progress'
 
 const LKEY: Record<string, string> = { en: 'en', bm: 'ms-MY', id: 'id-ID' }
 const jt = (j: Record<string, string> | null | undefined, loc: string) =>
@@ -15,6 +18,12 @@ const jt = (j: Record<string, string> | null | undefined, loc: string) =>
 
 interface Cohort { id: string; name: string; country: string | null; official_start_date: string; official_timezone: string; curriculum_version_id: string }
 interface Enrolment { id: string; cohort_id: string; status: string; catch_up: boolean }
+/* P0.2 — the three day concepts are resolved SERVER-SIDE by my_challenge_clock().
+   cohort_day  = where the shared cohort is on the calendar
+   stage       = where this warrior is in the lifecycle
+   accessible  = the latest day THIS warrior may open (0 unless ACTIVE)
+   The client never computes day access. */
+interface Clock { enrolment_id: string | null; cohort_day: number; accessible_day: number; participant_stage: string; cohort_name?: string; timezone?: string }
 interface DayRow { id: string; day_no: number; title: Record<string, string>; objective: Record<string, string>; content: Record<string, string>; required_action: Record<string, string>; evidence_requirement: Record<string, string>; reflection_question: Record<string, string>; xp_amount: number }
 
 export default function Challenge() {
@@ -23,7 +32,7 @@ export default function Challenge() {
   const [cohorts, setCohorts] = useState<Cohort[]>([])
   const [enrol, setEnrol] = useState<Enrolment | null>(null)
   const [readiness, setReadiness] = useState<string>('not_started')
-  const [dayNow, setDayNow] = useState(0)
+  const [clock, setClock] = useState<Clock>({ enrolment_id: null, cohort_day: 0, accessible_day: 0, participant_stage: 'none' })
   const [days, setDays] = useState<DayRow[]>([])
   const [openDay, setOpenDay] = useState<DayRow | null>(null)
   const [subs, setSubs] = useState<Record<number, string>>({})
@@ -39,6 +48,8 @@ export default function Challenge() {
   const [resp, setResp] = useState('')
   const [refl, setRefl] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [tab, setTab] = useState<'today' | 'progress' | 'roadmap'>('today')
+  const [quickLog, setQuickLog] = useState(false)
 
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3500) }
 
@@ -46,15 +57,22 @@ export default function Challenge() {
     if (!isReal || !supabase) return
     const { data: cs } = await supabase.from('cohorts').select('*').in('status', ['open', 'active'])
     setCohorts((cs as Cohort[]) ?? [])
-    const { data: es } = await supabase.from('enrolments').select('*').eq('participant_id', user!.id).limit(1)
+    const { data: es } = await supabase.from('enrolments')
+      .select('*').eq('participant_id', user!.id)
+      .order('created_at', { ascending: false }).limit(1)
     const e = (es?.[0] as Enrolment) ?? null
     setEnrol(e)
     if (e) {
       const { data: rs } = await supabase.from('readiness_submissions').select('status').eq('enrolment_id', e.id).order('created_at', { ascending: false }).limit(1)
       setReadiness(rs?.[0]?.status ?? 'not_started')
-      const { data: dn } = await supabase.rpc('cohort_day', { p_cohort: e.cohort_id })
-      setDayNow((dn as number) ?? 0)
-      const cid = (cs as Cohort[])?.find((c) => c.id === e.cohort_id)?.curriculum_version_id
+      const { data: ck } = await supabase.rpc('my_challenge_clock')
+      setClock((ck as Clock) ?? { enrolment_id: e.id, cohort_day: 0, accessible_day: 0, participant_stage: e.status })
+      let cid = (cs as Cohort[])?.find((c) => c.id === e.cohort_id)?.curriculum_version_id
+      if (!cid) {
+        // enrolled into a cohort that is not in the open/active list (draft, or admin-placed)
+        const { data: own } = await supabase.from('cohorts').select('*').eq('id', e.cohort_id).limit(1)
+        if (own?.[0]) { setCohorts((prev) => [...prev, own[0] as Cohort]); cid = (own[0] as Cohort).curriculum_version_id }
+      }
       if (cid) {
         const { data: ds } = await supabase.from('curriculum_days').select('*').eq('version_id', cid).order('day_no')
         setDays((ds as DayRow[]) ?? [])
@@ -112,6 +130,7 @@ export default function Challenge() {
   }
 
   if (!user) return null
+  const approvedCount = Object.values(subs).filter((s) => s === 'approved').length
   const header = (
     <header className="mb-4 flex items-center gap-3">
       <Link to="/grow" aria-label="Back" className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink"><ArrowLeft size={16} /></Link>
@@ -171,10 +190,16 @@ export default function Challenge() {
         </Card>
       )}
 
-      {/* ---- READINESS ---- */}
-      {enrol && enrol.status === 'onboarding' && (
+      {/* ---- READINESS (invited by an admin, or self-enrolled) ---- */}
+      {enrol && ['invited', 'onboarding', 'ready'].includes(enrol.status) && (
         <Card className="p-4">
           <SectionTitle>{t('ch.readinessGate')}</SectionTitle>
+          {/* the three concepts, never conflated: the cohort is on day N, you are not on day N */}
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <Chip>{t('ch.cohortDay')} {clock.cohort_day}/30</Chip>
+            <Chip tone="warning">{enrol.status.toUpperCase()}</Chip>
+            <Chip>{t('ch.yourDay')} —</Chip>
+          </div>
           {readiness === 'submitted' || readiness === 'under_review' ? (
             <div className="py-4 text-center">
               <Hourglass size={28} className="mx-auto mb-2 animate-pulse text-warning" />
@@ -194,18 +219,44 @@ export default function Challenge() {
         </Card>
       )}
 
-      {/* ---- ACTIVE: ROADMAP ---- */}
+      {/* ---- ACTIVE ---- */}
       {enrol && enrol.status === 'active' && !openDay && (
         <>
+          {/* TODAY is the main experience; the 30-day grid is the second view */}
+          <div className="mb-4 flex gap-1.5">
+            {([['today', t('ch.tabToday')], ['progress', t('ch.tabProgress')], ['roadmap', t('ch.roadmap')]] as const).map(([k, lbl]) => (
+              <button key={k} type="button" onClick={() => setTab(k)}
+                className={clsx('h-10 flex-1 cursor-pointer rounded-xl border text-xs font-extrabold',
+                  tab === k ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted')}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {tab === 'today' && (
+            <Today enrolmentId={enrol.id}
+              onOpenDay={(d) => { const row = days.find((x) => x.day_no === d); if (row) setOpenDay(row) }}
+              onQuickLog={() => setQuickLog(true)} />
+          )}
+          {tab === 'progress' && <Progress enrolmentId={enrol.id} />}
+          {tab === 'roadmap' && (
+          <>
           <Card className="mb-4 p-4">
-            <div className="mb-1 flex justify-between text-xs font-bold"><span>{t('ch.cohortDay')} {dayNow || t('ch.startsSoon')}</span><span className="text-muted">{Object.values(subs).filter((s) => s === 'approved').length} {t('ch.approvedCount')}</span></div>
-            <Bar pct={(dayNow / 30) * 100} />
+            <div className="mb-1 flex justify-between text-xs font-bold">
+              <span>{t('ch.yourDay')} {clock.accessible_day || t('ch.startsSoon')}<span className="text-muted"> / 30</span></span>
+              <span className="text-muted">{approvedCount} {t('ch.approvedCount')}</span>
+            </div>
+            {/* progress = what you have VERIFIED, not what the calendar says */}
+            <Bar pct={(approvedCount / 30) * 100} />
+            <p className="mt-2 text-[11px] text-muted">
+              {t('ch.cohortDay')} {clock.cohort_day}/30
+              {clock.accessible_day < clock.cohort_day && ` · ${t('ch.ownPace')}`}
+            </p>
           </Card>
           <SectionTitle>{t('ch.roadmap')}</SectionTitle>
           <div className="mb-4 grid grid-cols-5 gap-2">
             {Array.from({ length: 30 }, (_, i) => i + 1).map((d) => {
               const row = days.find((x) => x.day_no === d)
-              const locked = d > dayNow
+              const locked = d > clock.accessible_day
               const st = subs[d]
               return (
                 <button key={d} type="button" disabled={locked || !row}
@@ -221,6 +272,8 @@ export default function Challenge() {
               )
             })}
           </div>
+          </>
+          )}
           <Link to="/journey" className="mb-2.5 block">
             <Card className="flex items-center gap-3 p-3.5">
               <span className="text-xl">🎓</span>
@@ -332,11 +385,16 @@ export default function Challenge() {
       )}
 
       {/* other statuses */}
-      {enrol && !['onboarding', 'active'].includes(enrol.status) && !openDay && (
+      {enrol && !['invited', 'onboarding', 'ready', 'active'].includes(enrol.status) && !openDay && (
         <Card className="p-6 text-center">
           <Flame size={26} className="mx-auto mb-2 text-accent" />
           <p className="text-sm font-bold">{t('ch.status')} {enrol.status}</p>
         </Card>
+      )}
+
+      {quickLog && enrol && (
+        <QuickLog enrolmentId={enrol.id} onClose={() => setQuickLog(false)}
+          onDone={(m) => { setQuickLog(false); say(m); load() }} />
       )}
 
       {toast && <div className="fixed bottom-24 left-1/2 z-[200] w-[92%] max-w-sm -translate-x-1/2 rounded-xl bg-accent px-4 py-2.5 text-center text-xs font-bold text-on-accent shadow-lg">{toast}</div>}

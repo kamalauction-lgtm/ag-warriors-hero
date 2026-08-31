@@ -10,6 +10,8 @@ import { COUNTRY_CFG, compactMoney } from '../lib/format'
 import { TASKS, getDeals, pipelineValue } from '../lib/mockData'
 import { Avatar, Bar, Card, Chip, ProgressRing } from '../components/ui'
 import TimeBox from '../components/TimeBox'
+import CoachBrief from '../components/CoachBrief'
+import HelpRequest from '../components/HelpRequest'
 import type { Locale } from '../lib/types'
 
 const LOCALES: { v: Locale; label: string }[] = [
@@ -22,11 +24,23 @@ interface Live { enrolled: boolean; status: string; day: number; approved: numbe
 
 export default function MyDay() {
   const { user, t, theme, toggleTheme, locale, setLocale } = useApp()
+  /* one tiny trilingual helper — BM for MY warriors, ID for Indonesia */
+  const L = useCallback((en: string, bm: string, id: string) =>
+    locale === 'bm' ? bm : locale === 'id' ? id : en, [locale])
   const mascot = useBrand(user?.country ?? 'MY', 'mascot_home')
   const [toast, setToast] = useState('')
   const [live, setLive] = useState<Live | null>(null)
+  const [unread, setUnread] = useState(0)
   // real account = live data only; demo personas keep the showcase numbers
   const isReal = supabaseReady && !!user && user.id.includes('-')
+
+  useEffect(() => {
+    if (!isReal || !supabase || !user) return
+    supabase.from('notifications')
+      .select('id', { count: 'exact', head: true })
+      .eq('to_agent', user.id).eq('read', false)
+      .then(({ count }) => setUnread(count ?? 0))
+  }, [isReal, user])
 
   const loadLive = useCallback(async () => {
     if (!isReal || !supabase || !user) return
@@ -35,7 +49,8 @@ export default function MyDay() {
     const e = es?.[0] as { id: string; status: string; cohort_id: string } | undefined
     if (!e) { setLive({ enrolled: false, status: '', day: 0, approved: 0, xp: 0, streak: 0 }); return }
     const [dayR, subs, pl, st] = await Promise.all([
-      supabase.rpc('cohort_day', { p_cohort: e.cohort_id }),
+      // P0.2 — the warrior's OWN accessible day, never the cohort calendar day
+      supabase.rpc('participant_accessible_day', { p_enrolment: e.id }),
       supabase.from('task_submissions').select('day_no,status').eq('enrolment_id', e.id),
       supabase.from('points_ledger').select('amount').eq('user_id', user.id).eq('status', 'verified'),
       supabase.rpc('challenge_streak', { p_enrolment: e.id }),
@@ -65,10 +80,11 @@ export default function MyDay() {
   const greet =
     hour < 12 ? t('greeting.morning') : hour < 18 ? t('greeting.afternoon') : t('greeting.evening')
 
-  // MY shows BM optionally; ID shows ID; EN always
-  const allowed = LOCALES.filter(
-    (l) => l.v === 'en' || (user.country === 'MY' ? l.v === 'bm' : l.v === 'id'),
-  )
+  // Kamal (2026-08-10): all three languages selectable for everyone. Country
+  // still governs CONTENT; language is presentation only.
+  // MY = EN/BM · ID = ID/EN (Kamal, 2026-08-11)
+  const allowed = LOCALES.filter((l) =>
+    user.country === 'ID' ? l.v !== 'bm' : l.v !== 'id')
 
   return (
     <div className="animate-rise px-4 pt-5">
@@ -113,7 +129,11 @@ export default function MyDay() {
             className="relative flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted transition-colors duration-200 hover:text-ink"
           >
             <Bell size={16} />
-            <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-danger" />
+            {unread > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[9px] font-extrabold text-white">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
           </Link>
         </div>
       </header>
@@ -134,10 +154,10 @@ export default function MyDay() {
                 className="ez-osw text-sm font-bold uppercase tracking-[0.12em]"
                 style={{ color: '#d8b25a' }}
               >
-                Elite Team Command
+                {L('Elite Team Command', 'Komando Tim Elit', 'Komando Tim Elit')}
               </p>
               <p className="text-[11px]" style={{ color: '#c9c2a8' }}>
-                Enter your command center
+                {L('Enter your command center', 'Masuk pusat komando anda', 'Masuk pusat komando kamu')}
               </p>
             </div>
             <span className="text-lg" style={{ color: '#d8b25a' }}>
@@ -156,7 +176,7 @@ export default function MyDay() {
             <div className="grid flex-1 grid-cols-2 gap-x-2 gap-y-3 pr-20">
               <div>
                 <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">
-                  <Flame size={11} className="text-warning" /> Streak
+                  <Flame size={11} className="text-warning" /> {L('Streak', 'Rentetan', 'Beruntun')}
                 </p>
                 <p className="font-display text-lg font-extrabold">
                   {live?.streak ?? 0} <span className="text-[10px] font-semibold text-[#c9c2a8]">{t('common.streak')}</span>
@@ -164,17 +184,17 @@ export default function MyDay() {
               </div>
               <div>
                 <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">
-                  <Trophy size={11} className="text-accent" /> Verified XP
+                  <Trophy size={11} className="text-accent" /> {L('Verified XP', 'XP Disahkan', 'XP Terverifikasi')}
                 </p>
                 <p className="gold-text font-display text-lg font-extrabold">{live?.xp ?? 0}</p>
               </div>
               <div className="col-span-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">30 Days Closing Challenge</p>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#c9c2a8]">{L('30 Days Closing Challenge', 'Cabaran Closing 30 Hari', 'Tantangan Closing 30 Hari')}</p>
                 <p className="gold-text font-display text-2xl font-extrabold">
-                  {!live?.enrolled ? 'Not enrolled'
-                    : live.status !== 'active' ? 'Awaiting approval'
-                    : live.day === 0 ? 'Starts 8 Aug'
-                    : `Day ${live.day} of 30`}
+                  {!live?.enrolled ? L('Not enrolled', 'Belum daftar', 'Belum terdaftar')
+                    : live.status !== 'active' ? L('Awaiting approval', 'Menunggu kelulusan', 'Menunggu persetujuan')
+                    : live.day === 0 ? L('Starts 8 Aug', 'Mula 8 Ogos', 'Mulai 8 Agu')
+                    : `${L('Day', 'Hari', 'Hari')} ${live.day} ${L('of', 'daripada', 'dari')} 30`}
                 </p>
               </div>
             </div>
@@ -182,14 +202,14 @@ export default function MyDay() {
           <div className="relative mt-3 border-t border-white/10 pt-3">
             <Link to="/challenge"
               className="flex h-11 w-full cursor-pointer items-center justify-center rounded-xl bg-accent text-sm font-extrabold text-on-accent no-underline">
-              {!live?.enrolled ? 'Join the Challenge →'
-                : live.status !== 'active' ? 'View my enrolment →'
-                : live.day === 0 ? 'View the roadmap →'
-                : `Continue Day ${live.day} →`}
+              {!live?.enrolled ? L('Join the Challenge →', 'Sertai Cabaran →', 'Ikut Tantangan →')
+                : live.status !== 'active' ? L('View my enrolment →', 'Lihat pendaftaran saya →', 'Lihat pendaftaran saya →')
+                : live.day === 0 ? L('View the roadmap →', 'Lihat roadmap →', 'Lihat roadmap →')
+                : `${L('Continue Day', 'Teruskan Hari', 'Lanjutkan Hari')} ${live.day} →`}
             </Link>
             {live?.enrolled && live.status === 'active' && (
               <p className="mt-2 text-center text-[11px] text-[#c9c2a8]">
-                {live.approved} of 30 days verified by your Coach
+                {live.approved} {L('of 30 days verified by your Coach', 'daripada 30 hari disahkan oleh Coach anda', 'dari 30 hari terverifikasi oleh Coach kamu')}
               </p>
             )}
           </div>
@@ -233,6 +253,12 @@ export default function MyDay() {
         </div>
       </div>
       )}
+
+      {/* AG AI Coach — analyse the day against calls, leads and the plan */}
+      <CoachBrief />
+
+      {/* Minta Bantuan — raise a hand; help arrives with full context */}
+      <HelpRequest />
 
       {/* Time-Boxing — full M5: statuses, reasons, postpone, calendar, reminders */}
       <TimeBox onToast={say} />

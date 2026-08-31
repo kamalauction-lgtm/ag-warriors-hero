@@ -55,6 +55,7 @@ import Coaches from '../modules/challenge/Coaches'
 import Enrolment from '../modules/challenge/Enrolment'
 import Health from '../modules/challenge/Health'
 import Governance from '../modules/challenge/Governance'
+import Authority from '../modules/challenge/Authority'
 import CallerAdmin from '../modules/caller/CallerAdmin'
 import TalentAdmin from '../modules/talent/TalentAdmin'
 import OnbAdmin from '../modules/onboarding/OnbAdmin'
@@ -1118,7 +1119,7 @@ export default function Admin() {
     if (error) say('⚠ ' + (error as { message?: string }).message)
     else { say(ok); loadRewards() }
   }
-  const [chTab, setChTab] = useState<'health' | 'progress' | 'enrolment' | 'curriculum' | 'coaches' | 'reports' | 'governance'>('health')
+  const [chTab, setChTab] = useState<'health' | 'progress' | 'enrolment' | 'curriculum' | 'coaches' | 'reports' | 'governance' | 'authority'>('health')
   const [callerTab, setCallerTab] = useState<CallerTab>('overview')
   /* DEMO-ONLY fixtures. Rendered exclusively inside the `section === 'caller' &&
      !(supabaseReady && real id)` branch, behind a visible DEMO PREVIEW banner.
@@ -2272,14 +2273,16 @@ export default function Admin() {
                 </div>
               </a>
               <div className="mb-4 flex gap-1.5">
-                {(['health', 'progress', 'enrolment', 'curriculum', 'coaches', 'reports', 'governance'] as const).map((ct) => (
+                {(['health', 'progress', 'enrolment', 'curriculum', 'coaches', 'reports', 'governance', 'authority'] as const).map((ct) => (
                   <button key={ct} type="button" onClick={() => setChTab(ct)}
                     className={clsx('cursor-pointer rounded-full border px-4 py-2 text-xs font-extrabold capitalize', chTab === ct ? 'border-accent bg-accent-soft text-accent' : 'border-border text-muted hover:text-ink')}>
-                    {ct === 'health' ? '🩺 Health' : ct === 'progress' ? '📊 Progress' : ct === 'enrolment' ? '🎯 Enrolment' : ct === 'curriculum' ? '✏️ Curriculum' : ct === 'coaches' ? '👥 Coaches' : ct === 'governance' ? '⚖️ Governance' : '📄 Reports'}
+                    {ct === 'health' ? '🩺 Health' : ct === 'progress' ? '📊 Progress' : ct === 'enrolment' ? '🎯 Enrolment' : ct === 'curriculum' ? '✏️ Curriculum' : ct === 'coaches' ? '👥 Coaches' : ct === 'governance' ? '⚖️ Governance' : ct === 'authority' ? '🔑 Authority & Pilot' : '📄 Reports'}
                   </button>
                 ))}
               </div>
-              {chTab === 'governance'
+              {chTab === 'authority'
+                ? <Authority realId={supabaseReady && user.id.includes('-')} onSaved={say} />
+                : chTab === 'governance'
                 ? <Governance realId={supabaseReady && user.id.includes('-')} />
                 : chTab === 'health'
                 ? <Health team={team} realId={supabaseReady && user.id.includes('-')} />
@@ -2298,6 +2301,8 @@ export default function Admin() {
           {/* ============ APP CONTENT ============ */}
           {section === 'content' && (
             <>
+              <PosterChannels say={say} />
+              <InviteLinksPanel say={say} />
               <div className="mb-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {([
                   { t: 'Academy / ATLAS', d: 'Curriculum editor — Challenge lessons', go: 'challenge' as Section },
@@ -2600,5 +2605,230 @@ export default function Admin() {
         </div>
       )}
     </div>
+  )
+}
+
+/* ---------------------------------------------------------------------------
+   Poster channels — where a Win Poster may be published (095).
+   The Telegram bot token lives as a Worker secret; this screen only handles
+   chat ids, which are not credentials. "Find my groups" asks the bot which
+   groups it can see, so nobody has to hunt a chat id through a third-party bot
+   and drop the leading minus sign doing it.
+--------------------------------------------------------------------------- */
+function PosterChannels({ say }: { say: (m: string) => void }) {
+  const [rows, setRows] = useState<{ id: string; country: string; label: string; chat_id: string; active: boolean }[]>([])
+  const [found, setFound] = useState<{ chat_id: string; title: string; type: string }[] | null>(null)
+  const [bot, setBot] = useState<string>('')
+  const [form, setForm] = useState({ country: 'MY', label: '', chat_id: '' })
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(async () => {
+    if (!supabase) return
+    const { data } = await supabase.from('poster_channels')
+      .select('id,country,label,chat_id,active').order('country')
+    setRows((data as typeof rows) ?? [])
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const worker = async (path: string, body?: object) => {
+    const { data: s } = await supabase!.auth.getSession()
+    const res = await fetch(`https://m4u-api.iqiaggroup.workers.dev${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.session?.access_token}` },
+      body: JSON.stringify(body ?? {}),
+    })
+    return { ok: res.ok, body: await res.json().catch(() => ({})) as Record<string, unknown> }
+  }
+
+  const discover = async () => {
+    setBusy('find')
+    const r = await worker('/poster/telegram/chats')
+    setBusy('')
+    if (!r.ok) { say('⚠ ' + String(r.body.error ?? 'could not reach Telegram')); return }
+    setBot(String((r.body.bot as { username?: string })?.username ?? ''))
+    setFound((r.body.chats as typeof found) ?? [])
+    if (r.body.hint) say(String(r.body.hint))
+  }
+
+  const save = async () => {
+    if (!form.label.trim() || !form.chat_id.trim()) return
+    setBusy('save')
+    const { error } = await supabase!.rpc('fn_admin_set_poster_channel', {
+      p_country: form.country, p_label: form.label.trim(),
+      p_chat_id: form.chat_id.trim(), p_active: true, p_id: null,
+    })
+    setBusy('')
+    if (error) { say('⚠ ' + error.message); return }
+    say(`Saved — ${form.country} posts to ${form.label.trim()}`)
+    setForm({ country: form.country, label: '', chat_id: '' }); load()
+  }
+
+  const test = async (chat_id: string) => {
+    setBusy(chat_id)
+    const r = await worker('/poster/telegram/test', { chat_id })
+    setBusy('')
+    say(r.ok ? `✅ Test message delivered to ${String(r.body.sent_to ?? chat_id)}`
+             : `⚠ ${String(r.body.error ?? 'failed')}${r.body.hint ? ` — ${String(r.body.hint)}` : ''}`)
+  }
+
+  const inp = 'h-10 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent'
+  return (
+    <Card className="mb-5 p-4">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <p className="text-sm font-bold">Poster channels</p>
+        <Chip>{rows.length} configured</Chip>
+        <span className="flex-1" />
+        <button type="button" disabled={!!busy} onClick={discover}
+          className="h-9 cursor-pointer rounded-xl border border-border px-3 text-xs font-bold disabled:opacity-40">
+          {busy === 'find' ? 'Asking Telegram…' : 'Find my groups'}
+        </button>
+      </div>
+      <p className="mb-3 text-[11px] text-muted">
+        Where leaders may publish a Win Poster. One group per country — a leader only ever sees their own.
+        The bot token is stored on the server, never here.
+      </p>
+
+      {found && (
+        <div className="mb-3 rounded-xl border border-border p-3">
+          <p className="mb-2 text-xs font-bold">
+            {bot ? `@${bot} can see ${found.length} group(s)` : `${found.length} group(s) found`}
+          </p>
+          {found.length === 0 && <p className="text-[11px] text-muted">Add the bot to the group as an admin, then press “Find my groups” again.</p>}
+          {found.map((c) => (
+            <div key={c.chat_id} className="mb-1.5 flex flex-wrap items-center gap-2 text-xs last:mb-0">
+              <span className="flex-1 truncate font-semibold">{c.title}</span>
+              <code className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{c.chat_id}</code>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, label: c.title, chat_id: c.chat_id }))}
+                className="cursor-pointer rounded-full border border-accent/60 px-3 py-1 text-[10px] font-extrabold text-accent">use</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap gap-2">
+        <select value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}
+          aria-label="Country" className={`${inp} cursor-pointer`}>
+          <option value="MY">🇲🇾 MY</option>
+          <option value="ID">🇮🇩 ID</option>
+        </select>
+        <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}
+          placeholder="Label leaders see — AG Warriors MY" className={`${inp} min-w-[180px] flex-1`} />
+        <input value={form.chat_id} onChange={(e) => setForm({ ...form, chat_id: e.target.value })}
+          placeholder="-1001234567890" className={`${inp} min-w-[150px]`} />
+        <button type="button" disabled={busy === 'save' || !form.label.trim() || !form.chat_id.trim()} onClick={save}
+          className="h-10 cursor-pointer rounded-xl bg-accent px-4 text-xs font-extrabold text-on-accent disabled:opacity-40">
+          + Add
+        </button>
+      </div>
+
+      {rows.map((r) => (
+        <div key={r.id} className="mb-1.5 flex flex-wrap items-center gap-2 rounded-xl border border-border p-2.5 text-xs last:mb-0">
+          <span className="font-bold">{r.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.label}</span>
+          <code className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.chat_id}</code>
+          {!r.active && <Chip tone="warning">off</Chip>}
+          <span className="flex-1" />
+          <button type="button" disabled={!!busy} onClick={() => test(r.chat_id)}
+            className="cursor-pointer rounded-full border border-border px-3 py-1 text-[10px] font-extrabold text-muted hover:text-ink disabled:opacity-40">
+            {busy === r.chat_id ? 'sending…' : 'Send test'}
+          </button>
+        </div>
+      ))}
+      {rows.length === 0 && <p className="text-[11px] text-muted">No channels yet — leaders will see “no Telegram group connected”.</p>}
+    </Card>
+  )
+}
+
+/* ---------------------------------------------------------------------------
+   Group invite links (096) — the WhatsApp/Telegram groups new people are
+   invited into from Events. Links only; membership is never automated, because
+   no legitimate API can add a person to a WhatsApp or Telegram group and the
+   unofficial route gets the agency number banned. Keep "approve new members"
+   ON in both platforms so a leaked link still passes a human.
+--------------------------------------------------------------------------- */
+function InviteLinksPanel({ say }: { say: (m: string) => void }) {
+  const [rows, setRows] = useState<{ id: string; country: string; kind: string; label: string; url: string; active: boolean }[]>([])
+  const [form, setForm] = useState({ country: 'MY', kind: 'whatsapp', label: '', url: '' })
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!supabase) return
+    // reads go through the RPC (the table has no client policies at all)
+    const my = await supabase.rpc('fn_invite_context', { p_country: 'MY', p_leads: [] })
+    const id = await supabase.rpc('fn_invite_context', { p_country: 'ID', p_leads: [] })
+    const links = (c: string, d: unknown) =>
+      (((d as { links?: { id: string; kind: string; label: string; url: string; active: boolean }[] })?.links) ?? [])
+        .map((l) => ({ ...l, country: c }))
+    setRows([...links('MY', my.data), ...links('ID', id.data)])
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  const save = async () => {
+    if (!supabase || !form.label.trim() || !form.url.trim()) return
+    setBusy(true)
+    const { error } = await supabase.rpc('fn_admin_set_invite_link', {
+      p_country: form.country, p_kind: form.kind, p_label: form.label.trim(),
+      p_url: form.url.trim(), p_active: true, p_id: null,
+    })
+    setBusy(false)
+    if (error) { say('⚠ ' + error.message); return }
+    say(`Saved — ${form.kind} link for ${form.country}`)
+    setForm({ ...form, label: '', url: '' }); load()
+  }
+
+  const toggle = async (r: typeof rows[number]) => {
+    setBusy(true)
+    const { error } = await supabase!.rpc('fn_admin_set_invite_link', {
+      p_country: r.country, p_kind: r.kind, p_label: r.label, p_url: r.url,
+      p_active: !r.active, p_id: r.id,
+    })
+    setBusy(false)
+    if (error) { say('⚠ ' + error.message); return }
+    say(r.active ? 'Link switched off' : 'Link live again'); load()
+  }
+
+  const inp = 'h-10 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent'
+  return (
+    <Card className="mb-5 p-4">
+      <div className="mb-1 flex items-center gap-2">
+        <p className="text-sm font-bold">Group invite links</p>
+        <Chip>{rows.filter((r) => r.active).length} live</Chip>
+      </div>
+      <p className="mb-3 text-[11px] text-muted">
+        Used by Events → “Invite to groups”: WhatsApp opens with these links in a ready message.
+        Nothing is auto-joined — keep “approve new members” ON in the groups themselves.
+      </p>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <select value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })}
+          aria-label="Country" className={`${inp} cursor-pointer`}>
+          <option value="MY">🇲🇾 MY</option><option value="ID">🇮🇩 ID</option>
+        </select>
+        <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}
+          aria-label="Platform" className={`${inp} cursor-pointer`}>
+          <option value="whatsapp">WhatsApp</option><option value="telegram">Telegram</option>
+        </select>
+        <input value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })}
+          placeholder="Label — AG HEROES MY" className={`${inp} min-w-[160px] flex-1`} />
+        <input value={form.url} onChange={(e) => setForm({ ...form, url: e.target.value })}
+          placeholder={form.kind === 'whatsapp' ? 'https://chat.whatsapp.com/…' : 'https://t.me/+…'}
+          className={`${inp} min-w-[200px] flex-1`} />
+        <button type="button" disabled={busy || !form.label.trim() || !form.url.trim()} onClick={save}
+          className="h-10 cursor-pointer rounded-xl bg-accent px-4 text-xs font-extrabold text-on-accent disabled:opacity-40">
+          + Add
+        </button>
+      </div>
+      {rows.map((r) => (
+        <div key={r.id} className="mb-1.5 flex flex-wrap items-center gap-2 rounded-xl border border-border p-2.5 text-xs last:mb-0">
+          <span className="font-bold">{r.country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.kind === 'telegram' ? '✈️' : '🟢'} {r.label}</span>
+          <code className="max-w-[260px] truncate rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.url}</code>
+          <span className="flex-1" />
+          <button type="button" disabled={busy} onClick={() => toggle(r)}
+            className={`cursor-pointer rounded-full border px-3 py-1 text-[10px] font-extrabold ${
+              r.active ? 'border-success/60 text-success' : 'border-border text-muted'}`}>
+            {r.active ? 'live' : 'off'}
+          </button>
+        </div>
+      ))}
+      {rows.length === 0 && <p className="text-[11px] text-muted">No links yet — the Invite button stays hidden in Events until one is live.</p>}
+    </Card>
   )
 }

@@ -2,24 +2,35 @@
    Visible to elite_coach / master_mentor / super_admin. Self-review blocked server-side. */
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ShieldCheck, Check, RotateCcw } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, Check, RotateCcw, Eye } from 'lucide-react'
 import { useApp } from '../../lib/store'
 import { supabase, supabaseReady } from '../../lib/supabase'
 import { Card, Chip, SectionTitle } from '../../components/ui'
 import CoachBoard from './CoachBoard'
+import FocusManager from './FocusManager'
+import HelpInbox from './HelpInbox'
+import ReviewDetail from './ReviewDetail'
+import PodToday from './PodToday'
+import SlaBoard from './SlaBoard'
 
 interface Participant { participant_id: string; name: string }
-interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string; profiles: { name: string } | null } | null }
+interface ReadyRow { id: string; status: string; submitted_at: string; enrolments: { participant_id: string; goal_30d: string | null; profiles: { name: string } | null } | null }
 interface SubRow { id: string; day_no: number; version: number; response: string; reflection: string; submitted_at: string; enrolments: { participant_id: string; profiles: { name: string } | null } | null }
 interface CloseRow { id: string; status: string; required_steps: string | null; project: string | null; ch_leads: { name: string } | null; profiles: { name: string } | null }
+interface RQReady { id: string; participant_id: string; name: string; goal: string | null; submitted_at: string }
+interface RQEvidence { id: string; participant_id: string; name: string; day_no: number; version: number; response: string; submitted_at: string }
 interface PcjRow { id: string; step_code: string; response: string | null; profiles: { name: string } | null }
 
 export default function ReviewQueue() {
-  const { user } = useApp()
+  const { user, locale } = useApp()
+  /* one tiny trilingual helper — BM for MY coaches, ID for Indonesia */
+  const L = useCallback((en: string, bm: string, id: string) =>
+    locale === 'bm' ? bm : locale === 'id' ? id : en, [locale])
   const isReal = supabaseReady && !!user && user.id.includes('-')
   const [ready, setReady] = useState<ReadyRow[]>([])
   const [subs, setSubs] = useState<SubRow[]>([])
   const [note, setNote] = useState('')
+  const [reviewing, setReviewing] = useState<string | null>(null)
   const [canReview, setCanReview] = useState<boolean | null>(null)
   const [toast, setToast] = useState('')
   const [closings, setClosings] = useState<CloseRow[]>([])
@@ -33,22 +44,31 @@ export default function ReviewQueue() {
 
   const load = useCallback(async () => {
     if (!isReal || !supabase) return
-    // only reviewers see this page — the server enforces it too, this keeps the UI honest
-    const { data: mine } = await supabase.from('user_roles').select('role').eq('user_id', user!.id)
-    const ok = ((mine ?? []) as { role: string }[])
-      .some((r) => ['elite_coach', 'master_mentor', 'super_admin'].includes(r.role))
+    /* P0.7 — gate on the CANONICAL authorisation resolver, never on profiles.role
+       and never on user_roles alone. my_challenge_roles() folds in the platform
+       hierarchy (master_admin / country_admin / leader), which is why real Coaches
+       could not reach this page before. */
+    const { data: roles } = await supabase.rpc('my_challenge_roles')
+    const ok = ((roles ?? []) as string[])
+      .some((r) => ['elite_coach', 'master_mentor', 'super_admin'].includes(r))
     setCanReview(ok)
     if (!ok) return
-    const { data: r, error: e1 } = await supabase.from('readiness_submissions')
-      .select('id,status,submitted_at,enrolments(participant_id,goal_30d,profiles!enrolments_participant_id_fkey(name))')
-      .in('status', ['submitted', 'under_review']).order('submitted_at')
-    if (e1) say('⚠ ' + e1.message)
-    setReady((r as unknown as ReadyRow[]) ?? [])
-    const { data: s, error: e2 } = await supabase.from('task_submissions')
-      .select('id,day_no,version,response,reflection,submitted_at,enrolments(participant_id,profiles!enrolments_participant_id_fkey(name))')
-      .in('status', ['submitted', 'under_review']).order('submitted_at')
-    if (e2) say('⚠ ' + e2.message)
-    setSubs((s as unknown as SubRow[]) ?? [])
+    /* Dual-role fix: a Coach who is ALSO a participant must never be handed their
+       own submission as actionable review work. fn_review_queue() applies
+       is_reviewer_of(), which excludes self by definition — the client no longer
+       filters the raw tables itself. Self-review stays blocked server-side too. */
+    const { data: q, error: eq } = await supabase.rpc('fn_review_queue')
+    if (eq) say('⚠ ' + eq.message)
+    const queue = (q ?? {}) as { readiness?: RQReady[]; evidence?: RQEvidence[] }
+    setReady((queue.readiness ?? []).map((x) => ({
+      id: x.id, status: 'submitted', submitted_at: x.submitted_at,
+      enrolments: { participant_id: x.participant_id, goal_30d: x.goal, profiles: { name: x.name } },
+    })))
+    setSubs((queue.evidence ?? []).map((x) => ({
+      id: x.id, day_no: x.day_no, version: x.version, response: x.response, reflection: '',
+      submitted_at: x.submitted_at,
+      enrolments: { participant_id: x.participant_id, profiles: { name: x.name } },
+    })))
     const { data: cl, error: e3 } = await supabase.from('ch_closings')
       .select('id,status,required_steps,project,ch_leads(name),profiles!ch_closings_participant_id_fkey(name)')
       .eq('status', 'INTERNAL_REVIEW').order('updated_at')
@@ -79,66 +99,73 @@ export default function ReviewQueue() {
   return (
     <div className="animate-rise px-4 pt-5">
       <header className="mb-4 flex items-center gap-3">
-        <Link to="/team" aria-label="Back" className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink"><ArrowLeft size={16} /></Link>
+        <Link to="/team" aria-label={L('Back', 'Kembali', 'Kembali')} className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-border text-muted hover:text-ink"><ArrowLeft size={16} /></Link>
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-xl font-extrabold tracking-tight">Coach Review Queue</h1>
-          <p className="text-xs text-muted">Human approval only — every decision is audit-logged</p>
+          <h1 className="font-display text-xl font-extrabold tracking-tight">{L('Coach Review Queue', 'Barisan Semakan Coach', 'Antrean Tinjauan Coach')}</h1>
+          <p className="text-xs text-muted">{L('Human approval only — every decision is audit-logged', 'Kelulusan manusia sahaja — setiap keputusan direkod audit', 'Hanya persetujuan manusia — setiap keputusan dicatat audit')}</p>
         </div>
         <Chip tone="accent"><ShieldCheck size={11} /> Coach</Chip>
       </header>
 
       {!isReal ? (
-        <Card className="p-6 text-center text-sm text-muted">Sign in with a real Coach/Admin account to review.</Card>
+        <Card className="p-6 text-center text-sm text-muted">{L('Sign in with a real Coach/Admin account to review.', 'Log masuk dengan akaun Coach/Admin sebenar untuk menyemak.', 'Masuk dengan akun Coach/Admin asli untuk meninjau.')}</Card>
       ) : canReview === false ? (
         <Card className="p-6 text-center">
-          <p className="text-sm font-bold">This page is for Coaches and Admins</p>
+          <p className="text-sm font-bold">{L('This page is for Coaches and Admins', 'Halaman ini untuk Coach dan Admin', 'Halaman ini untuk Coach dan Admin')}</p>
           <p className="mx-auto mt-2 max-w-xs text-xs text-muted">
-            Your own challenge lives in <Link to="/challenge" className="font-bold text-accent">30 Days Closing Challenge</Link>.
+            {L('Your own challenge lives in', 'Cabaran anda sendiri ada di', 'Tantangan kamu sendiri ada di')} <Link to="/challenge" className="font-bold text-accent">{L('30 Days Closing Challenge', 'Cabaran Closing 30 Hari', 'Tantangan Closing 30 Hari')}</Link>.
           </p>
         </Card>
       ) : (
         <>
+          <PodToday />
+          <SlaBoard onReview={(_k, id) => setReviewing(id)} />
+          <HelpInbox />
           <CoachBoard />
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Review note (shared with participant)…"
+          <FocusManager />
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder={L('Review note (shared with participant)…', 'Nota semakan (dikongsi dengan peserta)…', 'Catatan tinjauan (dibagikan ke peserta)…')}
             className="mb-4 h-11 w-full rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
 
-          <SectionTitle>Readiness approvals ({ready.length})</SectionTitle>
-          {ready.length === 0 && <Card className="mb-4 p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          <SectionTitle>{L('Readiness approvals', 'Kelulusan kesediaan', 'Persetujuan kesiapan')} ({ready.length})</SectionTitle>
+          {ready.length === 0 && <Card className="mb-4 p-4 text-center text-xs text-muted">{L('Queue clear ✓', 'Barisan kosong ✓', 'Antrean kosong ✓')}</Card>}
           {ready.map((r) => (
             <Card key={r.id} className="mb-2.5 p-3.5">
               <p className="text-sm font-bold">{r.enrolments?.profiles?.name ?? 'Warrior'}</p>
-              <p className="mb-2 text-xs text-muted">Goal: {r.enrolments?.goal_30d ?? '—'}</p>
+              <p className="mb-2 text-xs text-muted">{L('Goal', 'Matlamat', 'Target')}: {r.enrolments?.goal_30d ?? '—'}</p>
               <div className="flex gap-2">
-                <button type="button" onClick={() => act('fn_review_readiness', { p_readiness: r.id, p_approve: true, p_note: note }, '✅ Readiness approved — enrolment ACTIVE')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Approve</button>
-                <button type="button" onClick={() => act('fn_review_readiness', { p_readiness: r.id, p_approve: false, p_note: note }, 'Revision requested')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Revision</button>
+                <button type="button" onClick={() => act('fn_review_readiness', { p_readiness: r.id, p_approve: true, p_note: note }, L('✅ Readiness approved — enrolment ACTIVE', '✅ Kesediaan diluluskan — pendaftaran AKTIF', '✅ Kesiapan disetujui — pendaftaran AKTIF'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> {L('Approve', 'Lulus', 'Setujui')}</button>
+                <button type="button" onClick={() => act('fn_review_readiness', { p_readiness: r.id, p_approve: false, p_note: note }, L('Revision requested', 'Semakan semula diminta', 'Revisi diminta'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> {L('Revision', 'Semak semula', 'Revisi')}</button>
               </div>
             </Card>
           ))}
 
-          <SectionTitle className="mt-4">Evidence review ({subs.length})</SectionTitle>
-          {subs.length === 0 && <Card className="p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          <SectionTitle className="mt-4">{L('Evidence review', 'Semakan bukti', 'Tinjauan bukti')} ({subs.length})</SectionTitle>
+          {subs.length === 0 && <Card className="p-4 text-center text-xs text-muted">{L('Queue clear ✓', 'Barisan kosong ✓', 'Antrean kosong ✓')}</Card>}
           {subs.map((s) => (
             <Card key={s.id} className="mb-2.5 p-3.5">
               <div className="mb-1 flex items-center gap-2">
                 <p className="text-sm font-bold">{s.enrolments?.profiles?.name ?? 'Warrior'}</p>
-                <Chip tone="accent">Day {s.day_no}</Chip>
+                <Chip tone="accent">{L('Day', 'Hari', 'Hari')} {s.day_no}</Chip>
                 {s.version > 1 && <Chip tone="warning">v{s.version}</Chip>}
               </div>
-              <p className="mb-1 rounded-lg bg-surface2 p-2 text-xs">{s.response}</p>
-              {s.reflection && <p className="mb-2 text-[11px] italic text-muted">"{s.reflection}"</p>}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => act('fn_review_submission', { p_submission: s.id, p_approve: true, p_note: note }, '✅ Approved — verified XP written to ledger')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Approve + XP</button>
-                <button type="button" onClick={() => act('fn_review_submission', { p_submission: s.id, p_approve: false, p_note: note }, 'Revision requested — original preserved')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Revision</button>
-              </div>
+              <p className="mb-1 line-clamp-2 rounded-lg bg-surface2 p-2 text-xs">{s.response}</p>
+              {/* P0.6 — no blind approvals. Every decision goes through the review
+                  sheet where the requirement, the evidence and the history are visible. */}
+              <button type="button" onClick={() => setReviewing(s.id)}
+                className="mt-2 flex h-11 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent text-xs font-extrabold text-on-accent">
+                <Eye size={14} /> {L('Open evidence & review', 'Buka bukti & semak', 'Buka bukti & tinjau')}
+              </button>
             </Card>
           ))}
+          {reviewing && (
+            <ReviewDetail submissionId={reviewing} onClose={() => setReviewing(null)}
+              onDone={(m) => { setReviewing(null); say(m); load() }} />
+          )}
           {/* ---- Closing verification (§15) — human-only ---- */}
-          <SectionTitle className="mt-4">🏁 Closing verification ({closings.length})</SectionTitle>
-          {closings.length === 0 && <Card className="p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          <SectionTitle className="mt-4">🏁 {L('Closing verification', 'Pengesahan closing', 'Verifikasi closing')} ({closings.length})</SectionTitle>
+          {closings.length === 0 && <Card className="p-4 text-center text-xs text-muted">{L('Queue clear ✓', 'Barisan kosong ✓', 'Antrean kosong ✓')}</Card>}
           {closings.map((c) => (
             <Card key={c.id} className="mb-2.5 p-3.5">
               <div className="mb-1 flex items-center gap-2">
@@ -147,17 +174,17 @@ export default function ReviewQueue() {
               </div>
               {c.required_steps && <p className="mb-2 rounded-lg bg-surface2 p-2 text-xs">{c.required_steps}</p>}
               <div className="flex gap-2">
-                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: true, p_note: note }, '🏆 Closing VERIFIED — +XP written to ledger')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Verify closing</button>
-                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: false, p_note: note }, 'Sent back — more documentation needed')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Not yet</button>
+                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: true, p_note: note }, L('🏆 Closing VERIFIED — +XP written to ledger', '🏆 Closing DISAHKAN — +XP direkod ke lejar', '🏆 Closing TERVERIFIKASI — +XP dicatat ke buku besar'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> {L('Verify closing', 'Sahkan closing', 'Verifikasi closing')}</button>
+                <button type="button" onClick={() => act('fn_verify_closing', { p_closing: c.id, p_approve: false, p_note: note }, L('Sent back — more documentation needed', 'Dikembalikan — perlu dokumen tambahan', 'Dikembalikan — perlu dokumen tambahan'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> {L('Not yet', 'Belum lagi', 'Belum')}</button>
               </div>
             </Card>
           ))}
 
           {/* ---- Post-closing journey review (§20) ---- */}
-          <SectionTitle className="mt-4">🎓 Journey steps ({pcj.length})</SectionTitle>
-          {pcj.length === 0 && <Card className="p-4 text-center text-xs text-muted">Queue clear ✓</Card>}
+          <SectionTitle className="mt-4">🎓 {L('Journey steps', 'Langkah perjalanan', 'Langkah perjalanan')} ({pcj.length})</SectionTitle>
+          {pcj.length === 0 && <Card className="p-4 text-center text-xs text-muted">{L('Queue clear ✓', 'Barisan kosong ✓', 'Antrean kosong ✓')}</Card>}
           {pcj.map((j) => (
             <Card key={j.id} className="mb-2.5 p-3.5">
               <div className="mb-1 flex items-center gap-2">
@@ -166,21 +193,21 @@ export default function ReviewQueue() {
               </div>
               {j.response && <p className="mb-2 rounded-lg bg-surface2 p-2 text-xs">{j.response}</p>}
               <div className="flex gap-2">
-                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: true, p_note: note }, '🎓 Step approved — Mentor Points awarded if configured')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> Approve</button>
-                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: false, p_note: note }, 'Revision requested')}
-                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> Revision</button>
+                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: true, p_note: note }, L('🎓 Step approved — Mentor Points awarded if configured', '🎓 Langkah diluluskan — Mentor Points diberi jika ditetapkan', '🎓 Langkah disetujui — Mentor Points diberikan jika diatur'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-success text-xs font-extrabold text-white"><Check size={14} /> {L('Approve', 'Lulus', 'Setujui')}</button>
+                <button type="button" onClick={() => act('fn_review_pcj', { p_progress: j.id, p_approve: false, p_note: note }, L('Revision requested', 'Semakan semula diminta', 'Revisi diminta'))}
+                  className="flex h-10 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-warning/60 text-xs font-extrabold text-warning"><RotateCcw size={14} /> {L('Revision', 'Semak semula', 'Revisi')}</button>
               </div>
             </Card>
           ))}
 
           {/* ---- Invite a warrior (§6 INVITED / §21) — WhatsApp delivery only ---- */}
-          <SectionTitle className="mt-5">➕ Invite a warrior</SectionTitle>
+          <SectionTitle className="mt-5">➕ {L('Invite a warrior', 'Jemput warrior', 'Undang warrior')}</SectionTitle>
           <Card className="mb-4 p-4">
             <div className="mb-2 grid grid-cols-2 gap-2">
-              <input value={nv.name} placeholder="Full name" onChange={(e) => setNv({ ...nv, name: e.target.value })}
+              <input value={nv.name} placeholder={L('Full name', 'Nama penuh', 'Nama lengkap')} onChange={(e) => setNv({ ...nv, name: e.target.value })}
                 className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
-              <input value={nv.phone} placeholder="+60 / +62 phone" onChange={(e) => setNv({ ...nv, phone: e.target.value })}
+              <input value={nv.phone} placeholder={L('+60 / +62 phone', 'Telefon +60 / +62', 'Telepon +60 / +62')} onChange={(e) => setNv({ ...nv, phone: e.target.value })}
                 className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
               <select value={nv.country} onChange={(e) => setNv({ ...nv, country: e.target.value })}
                 className="h-11 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
@@ -188,7 +215,7 @@ export default function ReviewQueue() {
               </select>
               <select value={nv.cohort} onChange={(e) => setNv({ ...nv, cohort: e.target.value })}
                 className="h-11 cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
-                <option value="">Cohort (optional)</option>
+                <option value="">{L('Cohort (optional)', 'Kohort (pilihan)', 'Cohort (opsional)')}</option>
                 {nvCohorts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
@@ -203,40 +230,40 @@ export default function ReviewQueue() {
                 else {
                   setLastInvite({ code: data as string, name: nv.name, phone: nv.phone.replace(/[\s-]/g, '') })
                   setNv({ name: '', phone: '', country: 'MY', cohort: '' })
-                  say('✉ Invitation created')
+                  say(L('✉ Invitation created', '✉ Jemputan dibuat', '✉ Undangan dibuat'))
                 }
               }}
               className="h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">
-              Create invitation
+              {L('Create invitation', 'Buat jemputan', 'Buat undangan')}
             </button>
             {lastInvite && (
               <div className="mt-3 rounded-xl border border-success/40 bg-success/10 p-3 text-center">
-                <p className="text-xs font-bold">Invite for {lastInvite.name} — code {lastInvite.code}</p>
+                <p className="text-xs font-bold">{L('Invite for', 'Jemputan untuk', 'Undangan untuk')} {lastInvite.name} — {L('code', 'kod', 'kode')} {lastInvite.code}</p>
                 <a target="_blank" rel="noreferrer"
                   href={`https://wa.me/${lastInvite.phone.replace('+', '')}?text=${encodeURIComponent(
                     `Salam ${lastInvite.name}! 🛡 You are invited to join IQI AG Hero — our Warriors platform. Accept here: https://hero.iqiaggroup.com/join/${lastInvite.code}`)}`}
                   className="mt-2 inline-flex h-10 w-full cursor-pointer items-center justify-center rounded-xl bg-success text-xs font-extrabold text-white">
-                  📲 Send via WhatsApp
+                  📲 {L('Send via WhatsApp', 'Hantar melalui WhatsApp', 'Kirim via WhatsApp')}
                 </a>
               </div>
             )}
           </Card>
 
           {/* ---- Coaching report (§16) ---- */}
-          <SectionTitle className="mt-5">🧭 Coaching report — write & share</SectionTitle>
+          <SectionTitle className="mt-5">🧭 {L('Coaching report — write & share', 'Laporan coaching — tulis & kongsi', 'Laporan coaching — tulis & bagikan')}</SectionTitle>
           <Card className="mb-6 p-4">
             <select value={rp.who} onChange={(e) => setRp({ ...rp, who: e.target.value })}
               className="mb-2 h-11 w-full cursor-pointer rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent">
-              <option value="">Choose participant…</option>
+              <option value="">{L('Choose participant…', 'Pilih peserta…', 'Pilih peserta…')}</option>
               {people.map((p) => <option key={p.participant_id} value={p.participant_id}>{p.name}</option>)}
             </select>
             <div className="mb-2 grid grid-cols-2 gap-2">
-              <input value={rp.period} onChange={(e) => setRp({ ...rp, period: e.target.value })} placeholder="Period (e.g. Week 1)"
+              <input value={rp.period} onChange={(e) => setRp({ ...rp, period: e.target.value })} placeholder={L('Period (e.g. Week 1)', 'Tempoh (cth. Minggu 1)', 'Periode (mis. Minggu 1)')}
                 className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
-              <input type="date" value={rp.next} onChange={(e) => setRp({ ...rp, next: e.target.value })} aria-label="Next review"
+              <input type="date" value={rp.next} onChange={(e) => setRp({ ...rp, next: e.target.value })} aria-label={L('Next review', 'Semakan berikut', 'Tinjauan berikutnya')}
                 className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
             </div>
-            {([['strengths', 'Strengths'], ['progress', 'Progress'], ['barriers', 'Barriers'], ['actions', 'Agreed actions + due dates']] as const).map(([k, ph]) => (
+            {([['strengths', L('Strengths', 'Kekuatan', 'Kekuatan')], ['progress', L('Progress', 'Kemajuan', 'Progres')], ['barriers', L('Barriers', 'Halangan', 'Hambatan')], ['actions', L('Agreed actions + due dates', 'Tindakan dipersetujui + tarikh akhir', 'Tindakan disepakati + tenggat')]] as const).map(([k, ph]) => (
               <textarea key={k} rows={2} value={rp[k]} placeholder={ph}
                 onChange={(e) => setRp({ ...rp, [k]: e.target.value })}
                 className="mb-2 w-full rounded-xl border border-border bg-surface p-2.5 text-sm outline-none focus:border-accent" />
@@ -246,11 +273,11 @@ export default function ReviewQueue() {
                 p_participant: rp.who, p_period: rp.period,
                 p_strengths: rp.strengths, p_progress: rp.progress, p_barriers: rp.barriers,
                 p_actions: rp.actions, p_next_review: rp.next || null,
-              }, '🧭 Report shared — participant notified')}
+              }, L('🧭 Report shared — participant notified', '🧭 Laporan dikongsi — peserta dimaklumkan', '🧭 Laporan dibagikan — peserta diberi tahu'))}
               className="h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent disabled:opacity-40">
-              Share report with participant
+              {L('Share report with participant', 'Kongsi laporan dengan peserta', 'Bagikan laporan ke peserta')}
             </button>
-            <p className="mt-2 text-[10px] text-muted">Comments must be professional, specific, linked to observable evidence (§16). No hidden scoring.</p>
+            <p className="mt-2 text-[10px] text-muted">{L('Comments must be professional, specific, linked to observable evidence (§16). No hidden scoring.', 'Komen mesti profesional, spesifik, berkait bukti yang boleh diperhati (§16). Tiada skor tersembunyi.', 'Komentar harus profesional, spesifik, terkait bukti yang dapat diamati (§16). Tidak ada skor tersembunyi.')}</p>
           </Card>
         </>
       )}

@@ -244,3 +244,46 @@ Existing agents keep their accounts (migrated with their country set); their his
 ---
 
 *This document is the single source of truth. Update it as decisions change.*
+
+---
+
+## Talent Compass — two banks, one engine (added 2026-08-04)
+
+`/testme` and `/myself` are the same participant journey, the same scoring
+function and the same report generator. They differ only in `talent_versions`:
+
+| | `/testme` | `/myself` |
+|---|---|---|
+| version | `v1` | `myself-v1` |
+| event | `AGLEADERSHIP` (cohort, capped) | `MYSELF` (standing public link) |
+| entry | event code | open, no code |
+| audience | people already in the AG world | public, may never have sold property |
+| items | 47 | 41 |
+
+Both emit the same six signal families (`style` `ent` `success` `motivation`
+`demotivator` `role`), which is why `talent_score()` and
+`worker/src/talentReport.js` needed no changes for the second bank. Keep it that
+way: a new bank should introduce new *keys* inside those families, never a new
+family, or scoring silently drops the signal.
+
+Regenerate a bank after editing wording:
+
+    python tools/talent_emit.py     # -> 027_talent_seed.sql   (v1)
+    python tools/myself_emit.py     # -> 033_myself_seed.sql   (myself-v1)
+
+### What `/myself` deliberately does not do
+It does not score loyalty, and it must not start. Whether someone will stay
+cannot be measured by a self-report questionnaire; what the bank captures
+instead (E3/E4) is what a person says would keep them somewhere and what would
+push them out. That is reported as *what this person needs*, never as a verdict.
+No protected characteristic is asked or inferred. The public screen states in
+all three languages that the form does not decide acceptance — because it does
+not, and people filling it in are making career decisions.
+
+### Facilitator dashboard (§15)
+`/testme/admin`, and the same screen embedded in Command HQ → Talent Compass.
+Consent is enforced in `032_talent_admin.sql`, not in the UI: the direct SELECT
+on `talent_reports` was dropped, and `talent_admin_report()` releases nothing for
+`private`, an overview slice for `summary`, and the whole report for `full`.
+Group aggregates cover everyone because they are anonymous counts, and no
+facilitator path reads `talent_responses` — written answers stay private (§6).

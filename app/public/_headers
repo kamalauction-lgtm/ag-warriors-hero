@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# SECURITY HEADERS (added 26 Aug 2026 after ren.iqiaggroup.com and
+# agen.iqiindonesia.id were found serving an injected ad-network script that
+# was spamming agents' phones). Hero was clean, but it had no policy that would
+# have STOPPED such a script executing. It does now.
+#
+# script-src lists the only hosts allowed to run code here. An injected
+# <script src="https://…someadnetwork…"> is refused by the browser even if it
+# somehow reaches the HTML. 'unsafe-inline' is still required by the two small
+# inline bootstrap blocks in index.html; everything else is self-hosted.
+# ---------------------------------------------------------------------------
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://m4u-api.iqiaggroup.workers.dev https://cloudflareinsights.com https://fonts.googleapis.com https://fonts.gstatic.com; worker-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: geolocation=(), microphone=(), payment=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# Asset filenames are content-hashed, so they can be cached hard and forever.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# index.html is the file that POINTS at those hashes. Cloudflare's edge was
+# serving a cached copy even with no-cache, so a deploy could go unnoticed for
+# hours — users kept loading the previous build's JS. no-store keeps it out of
+# the CDN entirely; it is a 1.6 kB file, so there is nothing to gain by caching.
+/
+  Cache-Control: no-store, must-revalidate
+/index.html
+  Cache-Control: no-store, must-revalidate
+/*
+  Cache-Control: no-store, must-revalidate
+
+/icons/*
+  Cache-Control: public, max-age=86400

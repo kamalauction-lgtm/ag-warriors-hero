@@ -10,6 +10,13 @@
   background: linear-gradient(135deg, #d4ac4a 0%, #a87e2c 60%, #8a6420 100%);
   box-shadow: 0 4px 14px rgba(212, 172, 74, 0.35);
 }
+/* The crest PNG is cut out on transparency, so it sits straight on the sidebar
+   with no tile behind it. A soft gold glow keeps the shield's black wings from
+   sinking into the dark surface without putting a box around the mark. */
+.adm-mark {
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45))
+          drop-shadow(0 0 7px rgba(212, 172, 74, 0.28));
+}
 .adm-nav-item {
   position: relative;
   transition: color 0.15s, background 0.15s;

@@ -9,3 +9,7 @@ supabase/migrations/018_m4u_data_lead_props.sql
 worker/.secrets.tmp
 worker/wh.tmp
 worker/.wrangler/
+
+# local scratch — service keys must never be committed
+.secret.tmp
+*.tmp

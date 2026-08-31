@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "build:fast": "vite build",
     "build:staging": "tsc -b && vite build --mode staging",
+    "deploy": "npm run build && npx wrangler deploy",
     "deploy:staging": "npm run build:staging && npx wrangler deploy --env staging",
     "typecheck": "tsc -b",
     "lint": "oxlint",
@@ -15,8 +16,11 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.111.0",
+    "@types/qrcode": "^1.5.6",
     "clsx": "^2.1.1",
+    "html-to-image": "^1.11.13",
     "lucide-react": "^1.28.0",
+    "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2"

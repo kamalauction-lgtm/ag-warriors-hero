@@ -15,6 +15,14 @@ interface Session { id: number; title: string; type: string; starts_at: string; 
 interface Roster { session_id: number; lead_id: number; attended: string; caller_id: string | null }
 interface Agent { id: string; name: string; email: string | null; status: string; role: string; country: string | null }
 interface Grant { agent_id: string; property_id: number; approved: boolean; active: boolean }
+/* A project request an agent made that nobody has decided yet. Before migration
+   092 these existed in the database but had no surface anywhere in the admin. */
+interface Pending {
+  agent_id: string; agent_name: string; agent_email: string | null
+  agent_country: string; agent_status: string
+  property_id: number; project: string; project_type: string
+  requested_at: string | null; waiting_hours: number | null
+}
 
 export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: (m: string) => void }) {
   const [props, setProps] = useState<Prop[]>([])
@@ -26,14 +34,24 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
   const [leadCounts, setLeadCounts] = useState<Record<number, number>>({})
   const [agents, setAgents] = useState<Agent[]>([])
   const [grants, setGrants] = useState<Grant[]>([])
+  const [pending, setPending] = useState<Pending[]>([])
+  const [declining, setDeclining] = useState<string | null>(null)
+  const [declineWhy, setDeclineWhy] = useState('')
   const [callCounts, setCallCounts] = useState<Record<string, number>>({})
   const [openAgent, setOpenAgent] = useState<string | null>(null)
   const [agentQ, setAgentQ] = useState('')
   const [busy, setBusy] = useState(false)
+  // add/edit state for the two things the old console could do and this one could not
+  const [qForm, setQForm] = useState({ body: '', author: '', country: 'MY' })
+  const [qEdit, setQEdit] = useState<Quote | null>(null)
+  const [sForm, setSForm] = useState({
+    title: '', type: 'online', country: 'MY', starts_at: '',
+    link: '', location: '', map_url: '', notes: '',
+  })
 
   const load = useCallback(async () => {
     if (!supabase) return
-    const [p, pi, f, q, s, r, l, ag, gr, at] = await Promise.all([
+    const [p, pi, f, q, s, r, l, ag, gr, at, pend] = await Promise.all([
       supabase.from('m4u_properties').select('*').order('country').order('name'),
       supabase.from('m4u_pipeline_map').select('*'),
       supabase.from('m4u_field_settings').select('*').order('sort_order'),
@@ -44,6 +62,7 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
       supabase.from('profiles').select('id,name,email,status,role,country').order('name'),
       supabase.from('m4u_grants').select('agent_id,property_id,approved,active'),
       supabase.from('m4u_attempts').select('agent_id').limit(5000),
+      supabase.rpc('fn_m4u_pending_requests'),
     ])
     setProps((p.data as Prop[]) ?? [])
     setPipes((pi.data as Pipe[]) ?? [])
@@ -63,6 +82,7 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
       calls[x.agent_id] = (calls[x.agent_id] ?? 0) + 1
     })
     setCallCounts(calls)
+    setPending((pend.data as unknown as Pending[]) ?? [])
   }, [])
   useEffect(() => { load() }, [load])
 
@@ -83,6 +103,14 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
     return { booked, attended, noShow, pending, showRate: booked ? (attended / booked) * 100 : 0 }
   }, [roster])
 
+  /* The single write path for project access (migration 092). The old code
+     PATCHed m4u_grants directly, which RLS silently filtered to zero rows —
+     the toast said "approved" and nothing changed. */
+  const setAccess = (agentId: string, propId: number, approved: boolean, ok: string) =>
+    save(async () => await supabase!.rpc('fn_m4u_set_project_access', {
+      p_agent: agentId, p_property: propId, p_approved: approved, p_reason: null,
+    }), ok)
+
   if (tab === 'agents') {
     const shown = agents.filter((a) =>
       !agentQ || a.name.toLowerCase().includes(agentQ.toLowerCase())
@@ -94,6 +122,69 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
 
     return (
       <>
+        {/* ---- PROJECT REQUESTS WAITING ON YOU ----
+            Agents could always ask for a project; until now the ask had nowhere
+            to appear, so requests sat unanswered for weeks. */}
+        {pending.length > 0 && (
+          <Card className="mb-3 border-warning/60 p-4">
+            <p className="mb-1 text-sm font-bold text-warning">
+              {pending.length} project request{pending.length > 1 ? 's' : ''} waiting for you
+            </p>
+            <p className="mb-3 text-[11px] text-muted">
+              The agent sees “pending approval” until you decide. No leads reach them from that project meanwhile.
+            </p>
+            {pending.map((r) => {
+              const key = `${r.agent_id}:${r.property_id}`
+              const days = r.waiting_hours == null ? null : Math.floor(r.waiting_hours / 24)
+              return (
+                <div key={key} className="mb-2 rounded-xl border border-border p-3 last:mb-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold">
+                        {r.agent_country === 'ID' ? '🇮🇩' : '🇲🇾'} {r.agent_name}
+                        <span className="ml-1.5 font-normal text-muted">wants</span> {r.project}
+                      </p>
+                      <p className="truncate text-[11px] text-muted">
+                        {r.agent_email} · {r.project_type}
+                        {r.waiting_hours == null
+                          ? ' · asked before we recorded request times'
+                          : ` · waiting ${days && days > 0 ? `${days}d` : `${r.waiting_hours}h`}`}
+                      </p>
+                    </div>
+                    {r.agent_status !== 'active' && <Chip tone="warning">{r.agent_status}</Chip>}
+                    {days != null && days >= 3 && <Chip tone="warning">{days} days</Chip>}
+                    <button type="button" disabled={busy}
+                      onClick={() => setAccess(r.agent_id, r.property_id, true,
+                        `${r.agent_name} approved for ${r.project}`)}
+                      className="cursor-pointer rounded-full bg-accent px-4 py-1.5 text-[11px] font-extrabold text-on-accent disabled:opacity-40">
+                      Approve
+                    </button>
+                    <button type="button" disabled={busy}
+                      onClick={() => { setDeclining(declining === key ? null : key); setDeclineWhy('') }}
+                      className="cursor-pointer rounded-full border border-border px-3 py-1.5 text-[11px] font-bold text-muted hover:text-ink">
+                      Decline
+                    </button>
+                  </div>
+                  {declining === key && (
+                    <div className="mt-2 flex flex-wrap gap-2 border-t border-border pt-2">
+                      <input value={declineWhy} onChange={(e) => setDeclineWhy(e.target.value)}
+                        placeholder="Reason — the agent is told this"
+                        className="h-9 min-w-[200px] flex-1 rounded-xl border border-border bg-surface2 px-3 text-xs outline-none focus:border-accent" />
+                      <button type="button" disabled={busy || !declineWhy.trim()}
+                        onClick={() => save(async () => await supabase!.rpc('fn_m4u_decline_request', {
+                          p_agent: r.agent_id, p_property: r.property_id, p_reason: declineWhy.trim(),
+                        }), `Declined — ${r.agent_name} was told why`).then(() => setDeclining(null))}
+                        className="h-9 cursor-pointer rounded-xl border border-danger/60 px-4 text-[11px] font-extrabold text-danger disabled:opacity-40">
+                        Send decline
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </Card>
+        )}
+
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <input value={agentQ} onChange={(e) => setAgentQ(e.target.value)} placeholder="Search name or email…"
             className="h-10 min-w-[200px] flex-1 rounded-xl border border-border bg-surface px-3 text-sm outline-none focus:border-accent" />
@@ -155,12 +246,8 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
                         {g?.approved && !g.active && <Chip>agent off</Chip>}
                         {g && !g.approved && <Chip tone="warning">requested</Chip>}
                         <button type="button" disabled={busy}
-                          onClick={() => save(async () => g
-                            ? await supabase!.from('m4u_grants').update({ approved: !g.approved })
-                                .eq('agent_id', a.id).eq('property_id', p.id)
-                            : await supabase!.from('m4u_grants')
-                                .insert({ agent_id: a.id, property_id: p.id, approved: true, active: true }),
-                            g?.approved ? 'Access removed' : 'Access approved')}
+                          onClick={() => setAccess(a.id, p.id, !g?.approved,
+                            g?.approved ? `${p.name} access removed` : `${p.name} approved for ${a.name}`)}
                           className={`cursor-pointer rounded-full border px-3 py-1 text-[10px] font-extrabold ${
                             g?.approved ? 'border-border text-muted' : 'border-accent/60 text-accent'}`}>
                           {g?.approved ? 'Remove' : 'Approve'}
@@ -251,19 +338,87 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
 
   if (tab === 'quotes') return (
     <>
-      <p className="mb-3 text-xs text-muted">Shown at random on the caller home screen.</p>
+      <Card className="mb-3 p-4">
+        <p className="mb-2 text-sm font-bold">{qEdit ? 'Edit quote' : 'Add a quote'}</p>
+        <textarea
+          value={qEdit ? qEdit.body : qForm.body}
+          onChange={(e) => qEdit ? setQEdit({ ...qEdit, body: e.target.value })
+                                 : setQForm({ ...qForm, body: e.target.value })}
+          placeholder="e.g. Every call brings you closer to the next closing."
+          rows={2}
+          className="mb-2 w-full rounded-xl border border-border bg-surface2 px-3 py-2 text-sm outline-none focus:border-accent" />
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={qEdit ? (qEdit.author ?? '') : qForm.author}
+            onChange={(e) => qEdit ? setQEdit({ ...qEdit, author: e.target.value })
+                                   : setQForm({ ...qForm, author: e.target.value })}
+            placeholder="Author / source (optional)"
+            className="h-10 min-w-[180px] flex-1 rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          <select
+            value={qEdit ? qEdit.country : qForm.country}
+            onChange={(e) => qEdit ? setQEdit({ ...qEdit, country: e.target.value })
+                                   : setQForm({ ...qForm, country: e.target.value })}
+            aria-label="Country"
+            className="h-10 cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+            <option value="MY">MY</option>
+            <option value="ID">ID</option>
+          </select>
+          {qEdit ? (
+            <>
+              <button type="button" disabled={busy || !qEdit.body.trim()}
+                onClick={() => save(async () => await supabase!.from('quotes').update({
+                  body: qEdit.body.trim(),
+                  author: qEdit.author?.trim() || null,
+                  country: qEdit.country,
+                }).eq('id', qEdit.id), 'Quote updated').then(() => setQEdit(null))}
+                className="h-10 cursor-pointer rounded-xl bg-accent px-4 text-xs font-extrabold text-on-accent disabled:opacity-40">
+                Save
+              </button>
+              <button type="button" onClick={() => setQEdit(null)}
+                className="h-10 cursor-pointer rounded-xl border border-border px-4 text-xs font-bold text-muted hover:text-ink">
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button type="button" disabled={busy || !qForm.body.trim()}
+              onClick={() => save(async () => await supabase!.from('quotes').insert({
+                body: qForm.body.trim(),
+                author: qForm.author.trim() || null,
+                country: qForm.country,
+                active: true,
+              }), 'Quote added').then(() => setQForm({ body: '', author: '', country: qForm.country }))}
+              className="h-10 cursor-pointer rounded-xl bg-accent px-5 text-xs font-extrabold text-on-accent disabled:opacity-40">
+              + Add
+            </button>
+          )}
+        </div>
+      </Card>
+
+      <p className="mb-2 text-xs text-muted">
+        Shown at random on the caller home screen. {quotes.filter((q) => q.active).length} active of {quotes.length}.
+      </p>
       {quotes.map((q) => (
         <Card key={q.id} className="mb-2 flex flex-wrap items-center gap-2 p-3.5">
           <div className="min-w-0 flex-1">
             <p className="text-sm italic">“{q.body}”</p>
             <p className="text-[11px] text-muted">— {q.author ?? 'AG'} · {q.country}</p>
           </div>
+          <button type="button" disabled={busy} onClick={() => setQEdit(q)}
+            className="cursor-pointer rounded-full border border-border px-3 py-1.5 text-[11px] font-bold text-muted hover:text-ink">
+            Edit
+          </button>
           <button type="button" disabled={busy}
             onClick={() => save(async () => await supabase!.from('quotes')
               .update({ active: !q.active }).eq('id', q.id), q.active ? 'Retired' : 'Live again')}
             className={`cursor-pointer rounded-full border px-3 py-1.5 text-[11px] font-extrabold ${
               q.active ? 'border-success/60 text-success' : 'border-border text-muted'}`}>
             {q.active ? 'active' : 'off'}
+          </button>
+          <button type="button" disabled={busy}
+            onClick={() => { if (confirm('Delete this quote permanently?'))
+              save(async () => await supabase!.from('quotes').delete().eq('id', q.id), 'Quote deleted') }}
+            className="cursor-pointer rounded-full border border-danger/50 px-3 py-1.5 text-[11px] font-bold text-danger">
+            Delete
           </button>
         </Card>
       ))}
@@ -280,6 +435,87 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
   const max = Math.max(1, ...FUNNEL.map((f) => f.v))
   return (
     <>
+      {/* Create a session — the old console could do this and this one could not,
+          so sessions could only ever be created outside the app. */}
+      <Card className="mb-4 p-4">
+        <p className="mb-1 text-sm font-bold">Create a BOP session</p>
+        <p className="mb-3 text-[11px] text-muted">
+          Callers pick one of these when they choose “Attend BOP”; the prospect then gets the
+          WhatsApp confirmation and reminder.
+        </p>
+        <div className="grid gap-2 md:grid-cols-2">
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Type</span>
+            <select value={sForm.type} onChange={(e) => setSForm({ ...sForm, type: e.target.value })}
+              className="mt-1 h-10 w-full cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+              <option value="online">Online</option>
+              <option value="physical">Physical</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Date &amp; time *</span>
+            <input type="datetime-local" value={sForm.starts_at}
+              onChange={(e) => setSForm({ ...sForm, starts_at: e.target.value })}
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+          <label className="block md:col-span-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Session title *</span>
+            <input value={sForm.title} onChange={(e) => setSForm({ ...sForm, title: e.target.value })}
+              placeholder="Business Opportunity Preview (Online)"
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Meeting link (online)</span>
+            <input value={sForm.link} onChange={(e) => setSForm({ ...sForm, link: e.target.value })}
+              placeholder="https://meet.google.com/…"
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Location / address (physical)</span>
+            <input value={sForm.location} onChange={(e) => setSForm({ ...sForm, location: e.target.value })}
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Map link (optional)</span>
+            <input value={sForm.map_url} onChange={(e) => setSForm({ ...sForm, map_url: e.target.value })}
+              placeholder="https://maps.app.goo.gl/…"
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Country</span>
+            <select value={sForm.country} onChange={(e) => setSForm({ ...sForm, country: e.target.value })}
+              className="mt-1 h-10 w-full cursor-pointer rounded-xl border border-border bg-surface2 px-3 text-sm outline-none">
+              <option value="MY">MY</option>
+              <option value="ID">ID</option>
+            </select>
+          </label>
+          <label className="block md:col-span-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-muted">Notes (optional)</span>
+            <input value={sForm.notes} onChange={(e) => setSForm({ ...sForm, notes: e.target.value })}
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface2 px-3 text-sm outline-none focus:border-accent" />
+          </label>
+        </div>
+        <button type="button" disabled={busy || !sForm.title.trim() || !sForm.starts_at}
+          onClick={() => save(async () => await supabase!.from('bop_sessions').insert({
+            title: sForm.title.trim(),
+            type: sForm.type,
+            country: sForm.country,
+            // datetime-local has no zone; the browser's own offset is the intended one
+            starts_at: new Date(sForm.starts_at).toISOString(),
+            link: sForm.link.trim() || null,
+            location: sForm.location.trim() || null,
+            map_url: sForm.map_url.trim() || null,
+            notes: sForm.notes.trim() || null,
+            active: true,
+          }), 'Session created').then(() => setSForm({
+            title: '', type: sForm.type, country: sForm.country, starts_at: '',
+            link: '', location: '', map_url: '', notes: '',
+          }))}
+          className="mt-3 h-10 cursor-pointer rounded-xl bg-accent px-5 text-xs font-extrabold text-on-accent disabled:opacity-40">
+          + Create session
+        </button>
+      </Card>
+
       <div className="mb-4 grid gap-3 md:grid-cols-2">
         <Card className="p-4">
           <p className="mb-3 text-sm font-bold">Recruitment funnel</p>
@@ -300,8 +536,27 @@ export default function CallerSetup({ tab, onToast }: { tab: SetupTab; onToast: 
           </p>
         </Card>
         <Card className="p-4">
-          <p className="mb-2 text-sm font-bold">Sessions</p>
-          <p className="text-[11px] text-muted">{sessions.filter((s) => s.active).length} active · {sessions.length} total</p>
+          <p className="mb-2 text-sm font-bold">Upcoming sessions</p>
+          {(() => {
+            const soon = sessions
+              .filter((x) => x.active && new Date(x.starts_at).getTime() > Date.now())
+              .sort((a, b) => +new Date(a.starts_at) - +new Date(b.starts_at))
+            if (!soon.length) return <p className="text-[11px] text-muted">No upcoming sessions.</p>
+            return (
+              <div className="space-y-1.5">
+                {soon.slice(0, 5).map((x) => (
+                  <div key={x.id} className="flex items-center gap-2 text-[11px]">
+                    <Chip tone="accent">{x.type}</Chip>
+                    <span className="min-w-0 flex-1 truncate">{x.title}</span>
+                    <span className="text-muted">{new Date(x.starts_at).toLocaleString()}</span>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
+          <p className="mt-3 text-[11px] text-muted">
+            {sessions.filter((x) => x.active).length} active · {sessions.length} total
+          </p>
         </Card>
       </div>
       {sessions.map((s) => {

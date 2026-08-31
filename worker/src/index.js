@@ -19,7 +19,8 @@ import { handleSocialPolish } from './socialPolish.js'
 import { sendPush } from './webPush.js'
 import { handleEventsNotify, sweepNoShows } from './events.js'
 import { handleKamalagSessions } from './kamalagSessions.js'
-import { handleCertRender, handleCertPdf, handleCertPreview, processCertEmails } from './certificates.js'
+import { handleCertRender, handleCertPdf, handleCertPreview, handleCertSend, processCertEmails } from './certificates.js'
+import { handlePosterCaption, handlePosterSend, handleTelegramChats, handleTelegramTest } from './poster.js'
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
@@ -819,6 +820,11 @@ export default {
     if (url.pathname === '/events/notify') return handleEventsNotify(request, env, corsHeaders)
     if (url.pathname === '/kamalag/sessions') return handleKamalagSessions(request, env, corsHeaders(request))
     if (url.pathname === '/cert/render') return handleCertRender(request, env, corsHeaders)
+    if (url.pathname === '/cert/send') return handleCertSend(request, env, corsHeaders)
+    if (url.pathname === '/poster/caption') return handlePosterCaption(request, env)
+    if (url.pathname === '/poster/send') return handlePosterSend(request, env)
+    if (url.pathname === '/poster/telegram/chats') return handleTelegramChats(request, env)
+    if (url.pathname === '/poster/telegram/test') return handleTelegramTest(request, env)
     if (url.pathname === '/cert/preview') return handleCertPreview(request, env, corsHeaders)
     if (url.pathname === '/cert/pdf') return handleCertPdf(request, env)
     if (url.pathname === '/sweep') {

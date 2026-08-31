@@ -1,25 +1,31 @@
+/* Sign-in — production only. The demo personas and the registration preview
+   were removed for launch (Kamal, 2026-08-09): real accounts come from admin
+   invitations, and a clean login page is what a real cohort should meet.
+   Includes the forgot-password flow (recovery email lands on /reset) and an
+   EN/BM/ID switcher — the platform rule says all three languages are always
+   selectable, and that starts before sign-in. */
 import { useState } from 'react'
-import { ChevronRight } from 'lucide-react'
-import { PERSONAS, useApp } from '../lib/store'
+import clsx from 'clsx'
+import { useApp } from '../lib/store'
+import { supabase } from '../lib/supabase'
 import { useBrand } from '../lib/brand'
-import { COUNTRY_CFG } from '../lib/format'
-import { Avatar, Chip } from '../components/ui'
-import type { User } from '../lib/types'
+import type { Locale } from '../lib/types'
 
-const ROLE_LABEL: Record<string, string> = {
-  master_admin: 'Master Admin',
-  country_admin: 'Country Admin',
-  leader: 'Leader',
-  agent: 'Agent',
-}
+const LOCALES: { v: Locale; label: string }[] = [
+  { v: 'en', label: 'EN' },
+  { v: 'bm', label: 'BM' },
+  { v: 'id', label: 'ID' },
+]
 
 export default function Login() {
-  const { login, authLogin } = useApp()
-  const [phone, setPhone] = useState('')
+  const { authLogin, t, locale, setLocale } = useApp()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const [forgot, setForgot] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [showPw, setShowPw] = useState(false)
   const shield = useBrand('GLOBAL', 'shield')
 
   const doLogin = async () => {
@@ -31,16 +37,33 @@ export default function Login() {
     if (e) setErr(e)
   }
 
-  // country pre-fill from phone prefix (the real registration flow)
-  const detected = phone.replace(/\s/g, '').startsWith('+62')
-    ? 'ID'
-    : phone.replace(/\s/g, '').startsWith('+60')
-      ? 'MY'
-      : null
+  const sendReset = async () => {
+    if (!supabase || !email.trim()) return
+    setBusy(true)
+    setErr('')
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset`,
+    })
+    setBusy(false)
+    // privacy-safe: never reveal whether the email exists
+    if (error && !/rate/i.test(error.message)) setErr(error.message)
+    else setSent(true)
+  }
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col justify-center px-6 py-10">
       <div className="animate-rise">
+        {/* language — selectable before sign-in, all three always */}
+        <div className="mb-4 flex justify-center gap-1.5">
+          {LOCALES.map((l) => (
+            <button key={l.v} type="button" onClick={() => setLocale(l.v)}
+              className={clsx('cursor-pointer rounded-full border px-3 py-1.5 text-[11px] font-bold transition-colors duration-200',
+                locale === l.v ? 'border-accent bg-accent text-on-accent' : 'border-border text-muted hover:text-ink')}>
+              {l.label}
+            </button>
+          ))}
+        </div>
+
         {/* Brand — hero splash */}
         <div className="hero-user mb-8 flex flex-col items-center px-6 pb-6 pt-7 text-center">
           <img
@@ -56,111 +79,92 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Real sign-in (Supabase) */}
-        <label htmlFor="email" className="mb-1.5 block text-xs font-semibold text-muted">
-          Sign in
-        </label>
-        <input
-          id="email"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
-        />
-        <input
-          id="password"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && doLogin()}
-          className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
-        />
-        {err && (
-          <p className="mb-2 rounded-lg border border-danger/50 bg-danger/10 p-2 text-xs font-semibold text-danger">
-            {err}
-          </p>
-        )}
-        <button
-          type="button"
-          onClick={doLogin}
-          disabled={busy || !email.trim() || !password}
-          className="mb-6 h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-
-        {/* Phone entry with country auto-detect */}
-        <label htmlFor="phone" className="mb-1.5 block text-xs font-semibold text-muted">
-          Phone number (registration preview)
-        </label>
-        <div className="relative mb-2">
-          <input
-            id="phone"
-            type="tel"
-            inputMode="tel"
-            placeholder="+60 12-345 6789"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
-          />
-          {detected && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2">
-              <Chip tone="accent">
-                {COUNTRY_CFG[detected].flag} {COUNTRY_CFG[detected].name}
-              </Chip>
-            </span>
-          )}
-        </div>
-        <p className="mb-8 text-[11px] leading-relaxed text-muted">
-          Your country is detected from your number — you can confirm it, and
-          admin can change it anytime.
-        </p>
-
-        {/* Demo personas */}
-        {/* new-warrior registration demo → onboarding gate */}
-        <button
-          type="button"
-          onClick={() =>
-            login({
-              id: 'demo_new', name: 'Danish Iman', phone: '+60 19-555 6677',
-              email: 'danish@demo.my', country: detected ?? 'MY', role: 'agent',
-              careerRank: 'REN', isElite: false, avatarColor: '#10b981',
-              points: 0, level: 1, levelName: 'Rookie',
-              onboarded: false, pendingApproval: true,
-            })
-          }
-          className="lift mb-6 w-full cursor-pointer rounded-xl border border-dashed border-accent/60 bg-accent-soft/40 p-3.5 text-sm font-extrabold text-accent"
-        >
-          📝 Daftar — new warrior (onboarding demo)
-        </button>
-
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted">
-          Demo preview (mock data)
-        </p>
-        <div className="space-y-2.5">
-          {PERSONAS.map((p: User) => (
+        {forgot ? (
+          /* ---------- forgot password ---------- */
+          sent ? (
+            <div className="rounded-2xl border border-border bg-surface p-5 text-center">
+              <p className="mb-1 text-sm font-bold">{t('lg.checkEmail')}</p>
+              <p className="mx-auto max-w-xs text-xs leading-relaxed text-muted">
+                {t('lg.checkEmailBody').replace('{email}', email.trim())}
+              </p>
+              <button type="button" onClick={() => { setForgot(false); setSent(false) }}
+                className="mt-4 cursor-pointer text-xs font-bold text-accent underline">
+                {t('lg.back')}
+              </button>
+            </div>
+          ) : (
+            <>
+              <label htmlFor="email" className="mb-1.5 block text-xs font-semibold text-muted">
+                {t('lg.reset')}
+              </label>
+              <input
+                id="email" type="email" placeholder={t('lg.resetEmailPh')} value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendReset()}
+                className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] outline-none transition-colors duration-200 focus:border-accent"
+              />
+              {err && (
+                <p className="mb-2 rounded-lg border border-danger/50 bg-danger/10 p-2 text-xs font-semibold text-danger">{err}</p>
+              )}
+              <button
+                type="button" onClick={sendReset} disabled={busy || !email.trim()}
+                className="mb-3 h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {busy ? t('lg.sending') : t('lg.sendReset')}
+              </button>
+              <button type="button" onClick={() => { setForgot(false); setErr('') }}
+                className="mx-auto block cursor-pointer text-xs font-bold text-muted underline hover:text-ink">
+                {t('lg.back')}
+              </button>
+            </>
+          )
+        ) : (
+          /* ---------- sign in ---------- */
+          <>
+            <label htmlFor="email" className="mb-1.5 block text-xs font-semibold text-muted">
+              {t('lg.signIn')}
+            </label>
+            <input
+              id="email" type="email" placeholder={t('lg.email')} value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              className="mb-2 h-12 w-full rounded-xl border border-border bg-surface px-4 text-[15px] text-ink outline-none transition-colors duration-200 focus:border-accent"
+              style={{ WebkitTextFillColor: 'var(--ink)', caretColor: 'var(--ink)' }}
+            />
+            <div className="relative mb-2">
+              <input
+                id="password" type={showPw ? 'text' : 'password'} placeholder={t('lg.password')} value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && doLogin()}
+                autoComplete="current-password"
+                className="h-12 w-full rounded-xl border border-border bg-surface px-4 pr-12 text-[15px] text-ink outline-none transition-colors duration-200 focus:border-accent"
+                style={{ WebkitTextFillColor: 'var(--ink)', caretColor: 'var(--ink)' }}
+              />
+              <button type="button" onClick={() => setShowPw((v) => !v)}
+                aria-label={showPw ? 'Hide password' : 'Show password'}
+                className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer text-lg text-muted hover:text-ink">
+                {showPw ? '🙈' : '👁'}
+              </button>
+            </div>
+            {err && (
+              <p className="mb-2 rounded-lg border border-danger/50 bg-danger/10 p-2 text-xs font-semibold text-danger">{err}</p>
+            )}
             <button
-              key={p.id}
-              type="button"
-              onClick={() => login(p)}
-              className="lift flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface p-3.5 text-left hover:border-accent/60"
+              type="button" onClick={doLogin} disabled={busy || !email.trim() || !password}
+              className="mb-3 h-12 w-full cursor-pointer rounded-xl bg-accent text-sm font-extrabold text-on-accent transition-opacity duration-200 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              <Avatar name={p.name} color={p.avatarColor} size={42} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[15px] font-semibold">
-                  {p.isElite && p.captainName ? p.captainName : p.name}
-                </span>
-                <span className="block text-xs text-muted">
-                  {COUNTRY_CFG[p.country].flag} {ROLE_LABEL[p.role]} ·{' '}
-                  {p.careerRank}
-                </span>
-              </span>
-              <ChevronRight size={18} className="shrink-0 text-muted" />
+              {busy ? t('lg.signingIn') : t('lg.signIn')}
             </button>
-          ))}
-        </div>
+            <button type="button" onClick={() => { setForgot(true); setErr('') }}
+              className="mx-auto block cursor-pointer text-xs font-bold text-muted underline hover:text-accent">
+              {t('lg.forgot')}
+            </button>
+            <a href="/register"
+              className="mx-auto mt-5 block w-fit cursor-pointer rounded-xl border border-accent/50 px-5 py-2.5 text-center text-xs font-extrabold text-accent no-underline transition-colors hover:bg-accent-soft">
+              ✨ {t('rg.cta')}
+            </a>
+          </>
+        )}
       </div>
     </div>
   )
