@@ -17,8 +17,13 @@ equivalent in Hero. Lean v1 = country War Room + pod squads (from real Elite
 pods) + DMs + push on mention; full port adds requires-response threads +
 chain-of-command routing.
 
-DECIDE (3): M4 agent-facing Projects library · EXSIM jsPDF doc generator ·
-M10 Project Support (Hero Help Request may cover it).
+DECIDED:
+- M4 Projects library → BUILT (migration 100, live & tested 19/19). Per-project
+  docs/links/instructions, country+grant scoped.
+- EXSIM jsPDF doc generator → DROPPED (28 Aug, Kamal). Not ported. If a project
+  needs a booking form, an admin uploads the template into the Project Library
+  instead of a code generator.
+- M10 Project Support → still open: does Hero's Help Request cover it?
 
 RETIRE: old push/notifications/must-see (Hero 064 + templates supersede).
 
@@ -44,7 +49,7 @@ D. **Delete hosting** — only after A CLEAR + Komunikasi live + ~30 days of
 ## Kamal's five decisions
 
 1. Komunikasi: lean v1 or full port?
-2. M4 Projects library: still needed in-app?
-3. EXSIM doc generator: still used?
+2. M4 Projects library: BUILT — migration 100, live.
+3. EXSIM doc generator: DROPPED (Kamal, 28 Aug) — not ported.
 4. M10 support: does Help Request cover it?
 5. Old call logs/booth leads: import or archive-and-let-go?
