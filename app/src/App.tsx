@@ -10,6 +10,7 @@ import Income from './pages/Income'
 import Career from './pages/Career'
 import Leads from './pages/Leads'
 import Team from './pages/Team'
+import Komunikasi from './pages/Komunikasi'
 import Elite from './pages/Elite'
 import Poster from './pages/Poster'
 import Grow from './pages/Grow'
@@ -121,6 +122,7 @@ export default function App() {
         <Route path="/sales/income" element={<Income />} />
         <Route path="/leads" element={<Leads />} />
         <Route path="/team" element={<Team />} />
+        <Route path="/komunikasi" element={<Komunikasi />} />
         <Route path="/team/career" element={<Career />} />
         <Route
           path="/team/elite"

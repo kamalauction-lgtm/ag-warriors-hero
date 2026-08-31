@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Crown, ImagePlus, Medal, Swords } from 'lucide-react'
+import { ChevronRight, Crown, ImagePlus, Medal, Swords, Radio } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
 import { supabase, supabaseReady } from '../lib/supabase'
@@ -62,6 +62,16 @@ export default function Team() {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-bold">{L('Career Path', 'Laluan Kerjaya', 'Jenjang Karier')}</p>
             <p className="text-[11px] text-muted">{L('REN → GVP ladder · your progress to the next rank', 'Tangga REN → GVP · kemajuan anda ke pangkat seterusnya', 'Tangga REN → GVP · progres kamu ke peringkat berikutnya')}</p>
+          </div>
+          <ChevronRight size={16} className="text-muted" />
+        </Card>
+      </Link>
+      <Link to="/komunikasi" className="mt-3 block">
+        <Card className="flex items-center gap-3 p-4">
+          <Radio size={18} className="text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold">{L('Command Radio', 'Command Radio', 'Command Radio')}</p>
+            <p className="text-[11px] text-muted">{L('War Room · squads · direct messages', 'War Room · skuad · mesej terus', 'War Room · skuad · pesan langsung')}</p>
           </div>
           <ChevronRight size={16} className="text-muted" />
         </Card>
