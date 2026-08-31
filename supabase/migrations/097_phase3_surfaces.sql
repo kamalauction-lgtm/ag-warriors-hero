@@ -138,36 +138,14 @@ grant execute on function fn_pilot_watch() to authenticated;
 -- ------------------------------------------------------------
 -- 4. CONTENT WORKFLOW: every country row still waiting for authorised content,
 --    plus who (if anyone) owns content for that country.
--- ------------------------------------------------------------
-create or replace function fn_content_gaps()
-returns jsonb language plpgsql stable security definer set search_path = public as $$
-begin
-  if not (has_role('super_admin') or has_role('master_mentor')
-          or exists (select 1 from ch_permissions
-                      where user_id = auth.uid()
-                        and permission in ('content.own', 'content.review'))) then
-    raise exception 'not authorised';
-  end if;
-  return jsonb_build_object(
-    'gaps', coalesce((
-      select jsonb_agg(jsonb_build_object(
-               'day_no', cd.day_no, 'country', cd.country_override,
-               'title', cd.title, 'content_status', cd.content_status)
-             order by cd.country_override, cd.day_no)
-      from curriculum_days cd
-      where cd.content_status = 'content_required'), '[]'::jsonb),
-    'owners', coalesce((
-      select jsonb_agg(jsonb_build_object('name', p.name, 'permission', pm.permission,
-                                          'country', pm.country))
-      from ch_permissions pm join profiles p on p.id = pm.user_id
-      where pm.permission in ('content.own', 'content.review')), '[]'::jsonb));
-end $$;
-revoke all on function fn_content_gaps() from public, anon;
-grant execute on function fn_content_gaps() to authenticated;
+-- (Section 4, a zero-arg fn_content_gaps(), was REMOVED after it collided
+--  with 081's fn_content_gaps(uuid) and made both unroutable - HTTP 300.
+--  The replacement, fn_content_board(), lives in 098_fix_content_board.sql.)
+
 
 -- ------------------------------------------------------------
 -- 5. VERIFY
 -- ------------------------------------------------------------
 select 'phase3 functions' as check, proname from pg_proc
- where proname in ('fn_authority_board','fn_verifier_queue','fn_pilot_watch','fn_content_gaps')
+ where proname in ('fn_authority_board','fn_verifier_queue','fn_pilot_watch','fn_content_board')
  order by proname;

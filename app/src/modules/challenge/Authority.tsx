@@ -64,7 +64,7 @@ export default function Authority({ realId, onSaved }: { realId: boolean; onSave
       supabase.rpc('fn_authority_board'),
       supabase.rpc('fn_verifier_queue'),
       supabase.rpc('fn_pilot_watch'),
-      supabase.rpc('fn_content_gaps'),
+      supabase.rpc('fn_content_board'),
       supabase.from('profiles').select('id,name,country').eq('status', 'active').order('name'),
     ])
     if (a.error) { setErr(a.error.message); setState('error'); return }
