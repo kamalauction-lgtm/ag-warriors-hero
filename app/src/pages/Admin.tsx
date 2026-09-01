@@ -491,39 +491,59 @@ function IncomeRules({ country, onSaved }: { country: 'MY' | 'ID'; onSaved: (m: 
       {country === 'MY' ? (
         <>
           <p className="mb-2 mt-3 rounded-lg border border-accent/40 bg-accent-soft/40 p-2 text-[10px] font-semibold">
-            🔒 MY Primary rules LOCKED (spec §E) — you edit project values only.
+            §E formula is fixed (TL = 50%×HOT, L = 30%×HOT, pool split). You set every project's numbers: REN%, VP pool% (A), HOT% (B), and which layers apply.
           </p>
           <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted">
-            MY primary projects — name · price · REN% · 🎁 RGR bonus (selected projects, immediate recruiter, set period)
+            MY primary projects — name · price · REN% · VP pool% (A) · HOT% (B) · layers · 🎁 RGR
           </p>
-          {(cfg.myPrimary ?? []).map((pr, i) => (
-            <div key={pr.id} className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-              <input defaultValue={pr.name} onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, name: e.target.value }; save({ myPrimary: ps }) }}
-                className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 outline-none focus:border-accent" />
-              <input type="number" defaultValue={pr.price} aria-label="Price"
-                onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, price: Number(e.target.value) || 0 }; save({ myPrimary: ps }) }}
-                className="w-24 rounded-lg border border-border bg-surface px-2 py-1.5 outline-none focus:border-accent" />
-              <input type="number" step={0.1} defaultValue={pr.ren} aria-label="REN %"
-                onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, ren: Number(e.target.value) || 0 }; save({ myPrimary: ps }) }}
-                className={num} />
-              <button type="button" title="RGR bonus on/off"
-                onClick={() => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, rgrOn: !pr.rgrOn }; save({ myPrimary: ps }) }}
-                className={clsx('cursor-pointer rounded-lg border px-2 py-1.5 font-bold', pr.rgrOn ? 'border-warning text-warning' : 'border-border text-muted opacity-50')}>🎁</button>
-              {pr.rgrOn && (
-                <>
-                  <input type="number" step={0.5} defaultValue={pr.rgrPct} aria-label="RGR %" title="RGR % of price"
-                    onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, rgrPct: Number(e.target.value) || 0 }; save({ myPrimary: ps }) }}
-                    className={clsx(num, 'border-warning/50')} />
-                  <input defaultValue={pr.rgrFrom ?? ''} placeholder="from" aria-label="Valid from"
-                    onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, rgrFrom: e.target.value }; save({ myPrimary: ps }) }}
-                    className="w-24 rounded-lg border border-border bg-surface px-2 py-1.5 outline-none focus:border-accent" />
-                  <input defaultValue={pr.rgrTo ?? ''} placeholder="to" aria-label="Valid to"
-                    onBlur={(e) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, rgrTo: e.target.value }; save({ myPrimary: ps }) }}
-                    className="w-24 rounded-lg border border-border bg-surface px-2 py-1.5 outline-none focus:border-accent" />
-                </>
-              )}
+          {(cfg.myPrimary ?? []).map((pr, i) => {
+            const setP = (patch: Partial<typeof pr>) => { const ps = [...(cfg.myPrimary ?? [])]; ps[i] = { ...pr, ...patch }; save({ myPrimary: ps }) }
+            return (
+            <div key={pr.id} className="mb-2 rounded-lg border border-border p-2">
+              <div className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs">
+                <input defaultValue={pr.name} onBlur={(e) => setP({ name: e.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 outline-none focus:border-accent" />
+                <button type="button" title="Remove this project"
+                  onClick={() => { if (window.confirm(`Remove ${pr.name}?`)) save({ myPrimary: (cfg.myPrimary ?? []).filter((_, j) => j !== i) }) }}
+                  className="cursor-pointer rounded-lg border border-danger/50 px-2 py-1.5 text-[10px] font-bold text-danger">✕</button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted">
+                <label>Price <input type="number" defaultValue={pr.price} aria-label="Price"
+                  onBlur={(e) => setP({ price: Number(e.target.value) || 0 })}
+                  className="ml-1 w-28 rounded-lg border border-border bg-surface px-2 py-1 text-ink outline-none focus:border-accent" /></label>
+                <label>REN% <input type="number" step={0.01} defaultValue={pr.ren} aria-label="REN %"
+                  onBlur={(e) => setP({ ren: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1')} /></label>
+                <label title="A — the VP+HOT leadership pool, % of price">VP pool% (A) <input type="number" step={0.01} defaultValue={pr.vp} aria-label="VP pool %"
+                  onBlur={(e) => setP({ vp: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1 border-accent/50')} /></label>
+                <label title="B — HOT %, also drives TL (50%×B) and L (30%×B)">HOT% (B) <input type="number" step={0.01} defaultValue={pr.hot} aria-label="HOT %"
+                  onBlur={(e) => setP({ hot: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1 border-accent/50')} /></label>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {([['hotOn', 'HOT'], ['tlOn', 'TL'], ['lOn', 'L']] as const).map(([k, lbl]) => (
+                  <button key={k} type="button" onClick={() => setP({ [k]: !pr[k] } as Partial<typeof pr>)}
+                    className={clsx('cursor-pointer rounded-lg border px-2 py-1 text-[10px] font-bold',
+                      pr[k] ? 'border-accent text-accent' : 'border-border text-muted opacity-50')}>
+                    {pr[k] ? '✓' : '✗'} {lbl}
+                  </button>
+                ))}
+                <button type="button" title="RGR bonus on/off"
+                  onClick={() => setP({ rgrOn: !pr.rgrOn })}
+                  className={clsx('cursor-pointer rounded-lg border px-2 py-1 text-[10px] font-bold', pr.rgrOn ? 'border-warning text-warning' : 'border-border text-muted opacity-50')}>🎁 RGR</button>
+                {pr.rgrOn && (
+                  <>
+                    <input type="number" step={0.5} defaultValue={pr.rgrPct} aria-label="RGR %" title="RGR % of price"
+                      onBlur={(e) => setP({ rgrPct: Number(e.target.value) || 0 })} className={clsx(num, 'border-warning/50')} />
+                    <input defaultValue={pr.rgrFrom ?? ''} placeholder="from" aria-label="Valid from"
+                      onBlur={(e) => setP({ rgrFrom: e.target.value })}
+                      className="w-24 rounded-lg border border-border bg-surface px-2 py-1 text-xs outline-none focus:border-accent" />
+                    <input defaultValue={pr.rgrTo ?? ''} placeholder="to" aria-label="Valid to"
+                      onBlur={(e) => setP({ rgrTo: e.target.value })}
+                      className="w-24 rounded-lg border border-border bg-surface px-2 py-1 text-xs outline-none focus:border-accent" />
+                  </>
+                )}
+              </div>
             </div>
-          ))}
+          )})}
           <button type="button" onClick={() => save({ myPrimary: [...(cfg.myPrimary ?? []), { id: `m${Date.now()}`, name: 'New project', price: 500000, ren: 2, vp: 0.73, hot: 0.4, hotOn: true, tlOn: true, lOn: true, rgrOn: false, rgrPct: 1, appear: ['income'] }] })}
             className="cursor-pointer text-xs font-bold text-accent">+ Add MY project</button>
         </>

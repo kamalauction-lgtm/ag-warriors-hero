@@ -60,12 +60,10 @@ function PrimaryMYNew() {
   const CHAIN: { key: string; label: string }[] = [
     { key: 'VP', label: 'VP' }, { key: 'HOT', label: 'HOT' },
     { key: 'TL', label: 'TL' }, { key: 'L', label: 'L' }, { key: 'REN', label: 'REN' },
-    { key: 'IQI', label: 'IQI ⓒ' },
   ]
   const layerOn = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
     rank === 'REN' || rank === 'VP' ? true
-    : rank === 'HOT' ? !!p.hotOn : rank === 'TL' ? !!p.tlOn : rank === 'L' ? !!p.lOn
-    : rank === 'IQI' ? ((p.tlOn ? 1 : 0) + (p.lOn ? 1 : 0)) > 0 : false
+    : rank === 'HOT' ? !!p.hotOn : rank === 'TL' ? !!p.tlOn : rank === 'L' ? !!p.lOn : false
   const takeHome = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
     layerOn(p, rank) ? sst((p.price * (rates(p)[rank] ?? 0)) / 100) : null
   return (
