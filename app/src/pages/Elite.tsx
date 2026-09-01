@@ -73,7 +73,14 @@ export default function Elite() {
   const nav = useNavigate()
   const { user } = useApp()
   const isReal = supabaseReady && !!user && user.id.includes('-')
-  const cfg = useIncomeCfg(user?.country ?? 'MY')
+  /* A master admin is Commander of BOTH countries; a country admin commands
+     their own. elCountry is which country's Elite team is on screen, and
+     podList lets them command ANY pod in it — not just the first one. The
+     backend already authorises master_admin for every pod (my_role check on
+     every pod policy), so this is purely the surface that was missing. */
+  const [elCountry, setElCountry] = useState<'MY' | 'ID'>((user?.country as 'MY' | 'ID') ?? 'MY')
+  const [podList, setPodList] = useState<PodInfo[]>([])
+  const cfg = useIncomeCfg(elCountry)
   const projects: Project[] = cfg.myPrimary ?? []
   const [view, setView] = useState<View>(null)
   const [pod, setPod] = useState<PodInfo | null | undefined>(undefined)   // undefined = loading
@@ -85,16 +92,22 @@ export default function Elite() {
   const say = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2600) }
 
   const isAdmin = user?.role === 'master_admin' || user?.role === 'country_admin'
+  const canSwitchCountry = user?.role === 'master_admin'   // only the master commands both
   const iamCaptain = !!pod && !!user && pod.captain_id === user.id
 
-  /* ---------- my pod: captain first, then member, then admin preview ---------- */
+  const withCaptain = useCallback(async (row: { id: string; name: string; captain_id: string }) => {
+    const { data: who } = await supabase!.from('profiles').select('name').eq('id', row.captain_id).maybeSingle()
+    return { ...row, captainName: (who as { name: string } | null)?.name ?? 'Unassigned' }
+  }, [])
+
+  /* ---------- my pod: captain first, then member, then admin command view ---------- */
   const loadPod = useCallback(async () => {
     if (!isReal || !supabase || !user) { setPod(null); return }
     type PodRow = { id: string; name: string; captain_id: string }
-    let row: PodRow | null = null
+    // a captain or member always lands on their own pod, no picker
     const { data: cap } = await supabase.from('pods').select('id,name,captain_id')
       .eq('captain_id', user.id).limit(1)
-    row = (cap?.[0] as PodRow | undefined) ?? null
+    let row = (cap?.[0] as PodRow | undefined) ?? null
     if (!row) {
       const { data: mem } = await supabase.from('pod_members').select('pod_id').eq('agent_id', user.id).limit(1)
       if (mem?.[0]) {
@@ -103,15 +116,19 @@ export default function Elite() {
         row = (p?.[0] as PodRow | undefined) ?? null
       }
     }
-    if (!row && isAdmin) {
-      const { data: p } = await supabase.from('pods').select('id,name,captain_id')
-        .eq('country', user.country).order('name').limit(1)
-      row = (p?.[0] as PodRow | undefined) ?? null
+    if (row) { setPodList([]); setPod(await withCaptain(row)); return }
+
+    // an admin/commander commands EVERY pod in the country on screen
+    if (isAdmin) {
+      const { data: all } = await supabase.from('pods').select('id,name,captain_id')
+        .eq('country', elCountry).order('name')
+      const list = await Promise.all(((all as PodRow[]) ?? []).map(withCaptain))
+      setPodList(list)
+      setPod(list[0] ?? null)          // open the first; the picker switches
+      return
     }
-    if (!row) { setPod(null); return }
-    const { data: who } = await supabase.from('profiles').select('name').eq('id', row.captain_id).single()
-    setPod({ ...row, captainName: (who as { name: string } | null)?.name ?? 'Captain' })
-  }, [isReal, user, isAdmin])
+    setPod(null)
+  }, [isReal, user, isAdmin, elCountry, withCaptain])
 
   const loadBoard = useCallback(async () => {
     if (!supabase || !pod) return
@@ -261,11 +278,39 @@ export default function Elite() {
         <button type="button" onClick={() => nav('/team')} className="ez-ghost-btn px-3 py-2 text-xs font-bold">← Exit</button>
       </div>
 
+      {/* Commander controls: switch country (master only) + pick any pod to command */}
+      {isAdmin && (podList.length > 0 || canSwitchCountry) && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {canSwitchCountry && (['MY', 'ID'] as const).map((c) => (
+            <button key={c} type="button" onClick={() => { setElCountry(c); setPod(undefined) }}
+              className="ez-ghost-btn px-3 py-2 text-xs font-bold"
+              style={elCountry === c ? { borderColor: '#d8b25a', color: '#d8b25a' } : undefined}>
+              {c === 'ID' ? '🇮🇩 Indonesia' : '🇲🇾 Malaysia'}
+            </button>
+          ))}
+          {podList.length > 0 && (
+            <select value={pod?.id ?? ''} aria-label="Choose pod to command"
+              onChange={(e) => setPod(podList.find((p) => p.id === e.target.value) ?? null)}
+              className="ez-ghost-btn ml-auto min-w-[150px] flex-1 cursor-pointer px-3 py-2 text-xs font-bold"
+              style={{ background: 'transparent' }}>
+              {podList.map((p) => <option key={p.id} value={p.id} style={{ color: '#111' }}>{p.name} · {p.captainName}</option>)}
+            </select>
+          )}
+          <span className="text-[11px]" style={{ color: '#c9c2a8' }}>
+            {podList.length} pod{podList.length === 1 ? '' : 's'} in {elCountry}
+          </span>
+        </div>
+      )}
+
       {pod === null && (
         <div className="ez-camo mb-4 rounded-xl p-5 text-center">
-          <p className="ez-osw text-base font-bold" style={{ color: '#d8b25a' }}>No pod yet</p>
+          <p className="ez-osw text-base font-bold" style={{ color: '#d8b25a' }}>
+            {isAdmin ? `No pods in ${elCountry} yet` : 'No pod yet'}
+          </p>
           <p className="mx-auto mt-1 max-w-xs text-[11px]" style={{ color: '#c9c2a8' }}>
-            Pods and Captains are appointed in Command HQ → Elite & Captains. Once you belong to one, this command centre goes live.
+            {isAdmin
+              ? 'Create pods and appoint Captains in Command HQ → Elite & Captains.'
+              : 'Pods and Captains are appointed in Command HQ → Elite & Captains. Once you belong to one, this command centre goes live.'}
           </p>
         </div>
       )}
@@ -374,7 +419,7 @@ export default function Elite() {
         </Sheet>
       )}
 
-      {view === 'balang' && <BalangSheet onClose={() => setView(null)} />}
+      {view === 'balang' && <BalangSheet onClose={() => setView(null)} country={elCountry} />}
       {view === 'kpi' && <KpiSheet onClose={() => setView(null)} userId={user.id} />}
       {view === 'income' && projects.length > 0 && (
         <PoolCalcSheet onClose={() => setView(null)} rank={user.careerRank} projects={projects} />
@@ -542,13 +587,14 @@ function CallbackSheet({ onClose, onSave }: { onClose: () => void; onSave: (h: n
 }
 
 /* ---------------- Pool / Balang — live pods + funded closings ---------------- */
-function BalangSheet({ onClose }: { onClose: () => void }) {
+function BalangSheet({ onClose, country }: { onClose: () => void; country: 'MY' | 'ID' }) {
   const [rows, setRows] = useState<{ pod: string; captain: string; members: number; poolIn: number }[] | null>(null)
   useEffect(() => {
     if (!supabase) return
     ;(async () => {
+      // scoped to the country on screen — MY and ID balang never mix
       const [{ data: p }, { data: m }, { data: pl }] = await Promise.all([
-        supabase.from('pods').select('id,name,captain_id').order('name'),
+        supabase.from('pods').select('id,name,captain_id').eq('country', country).order('name'),
         supabase.from('pod_members').select('pod_id'),
         supabase.from('pod_leads').select('pod_id,booking').eq('status', 'booked'),
       ])
