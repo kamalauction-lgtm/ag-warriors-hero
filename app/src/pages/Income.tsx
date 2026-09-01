@@ -50,6 +50,19 @@ function PrimaryMYNew() {
     'Belum ada projek dipaparkan di sini — admin tambah dalam peraturan Income.',
     'Belum ada proyek yang tampil di sini — admin menambahkannya di aturan Income.')}</Card>
   const myRate = rates(sel)[pos] ?? rates(sel).REN
+  /* The rank chain, top-earner to front-line. A VP/GVP (and admins) can see the
+     whole downline OV — what every level takes on the same unit — so the top can
+     read the full split, not just their own line. A layer that is switched off
+     for a project shows a dash, never a phantom number. */
+  const CHAIN: { key: string; label: string }[] = [
+    { key: 'VP', label: 'VP' }, { key: 'HOT', label: 'HOT' },
+    { key: 'TL', label: 'TL' }, { key: 'L', label: 'L' }, { key: 'REN', label: 'REN' },
+  ]
+  const layerOn = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
+    rank === 'REN' || rank === 'VP' ? true
+    : rank === 'HOT' ? !!p.hotOn : rank === 'TL' ? !!p.tlOn : rank === 'L' ? !!p.lOn : false
+  const takeHome = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
+    layerOn(p, rank) ? sst((p.price * (rates(p)[rank] ?? 0)) / 100) : null
   return (
     <>
       {/* role banner — like the original */}
@@ -130,39 +143,102 @@ function PrimaryMYNew() {
         </Card>
       )}
 
+      {/* full downline chain for the selected unit — top ranks only */}
+      {privileged && (
+        <Card className="mb-4 p-4">
+          <p className="mb-1 border-l-2 border-accent pl-2 font-display text-sm font-extrabold">
+            {L('Full chain — this unit', 'Rantaian penuh — unit ini', 'Rantai penuh — unit ini')}
+          </p>
+          <p className="mb-3 text-[11px] text-muted">{sel.name} · RM {sel.price.toLocaleString('en-MY', { minimumFractionDigits: 2 })} · {L('per unit, after SST', 'seunit, selepas SST', 'per unit, setelah SST')}</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            {CHAIN.map(({ key, label }) => {
+              const th = takeHome(sel, key)
+              return (
+                <div key={key} className={clsx('rounded-xl border p-2.5 text-center',
+                  key === 'VP' ? 'border-accent/50 bg-accent-soft/40' : 'border-border')}>
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</p>
+                  <p className={clsx('font-display text-sm font-extrabold', th == null && 'text-muted')}>
+                    {th == null ? '—' : fmt(th)}
+                  </p>
+                  <p className="text-[9px] text-muted">{th == null ? L('layer off', 'lapisan tutup', 'lapisan mati') : `${(rates(sel)[key] ?? 0).toFixed(2)}%`}</p>
+                </div>
+              )
+            })}
+          </div>
+          <p className="mt-3 text-[10px] text-muted">
+            {L('This is the whole downline split on one unit — VP down to REN. Layers switched off for this project show a dash.',
+               'Ini pecahan seluruh downline untuk satu unit — VP hingga REN. Lapisan yang ditutup untuk projek ini dipapar dengan sengkang.',
+               'Ini pembagian seluruh downline untuk satu unit — VP hingga REN. Lapisan yang dimatikan untuk proyek ini ditampilkan dengan tanda hubung.')}
+          </p>
+        </Card>
+      )}
+
       {/* income comparison */}
       <Card className="mb-4 overflow-x-auto">
         <div className="flex items-center justify-between p-4 pb-2">
           <p className="border-l-2 border-accent pl-2 font-display text-sm font-extrabold">{L('Income comparison', 'Perbandingan pendapatan', 'Perbandingan penghasilan')}</p>
           <button type="button" onClick={() => window.print()} className="cursor-pointer rounded-lg bg-accent px-3 py-1.5 text-[11px] font-bold text-on-accent">🖶 {L('Save / Print', 'Simpan / Cetak', 'Simpan / Cetak')}</button>
         </div>
-        <table className="w-full min-w-[560px] text-xs">
-          <thead>
-            <tr className="border-b border-border text-left text-[9px] uppercase tracking-wider text-muted">
-              <th className="px-4 py-2">{L('Project', 'Projek', 'Proyek')}</th><th className="px-2 py-2 text-right">{L('Unit price', 'Harga unit', 'Harga unit')}</th>
-              <th className="px-2 py-2 text-right">REN</th><th className="px-2 py-2 text-right">RGR</th>
-              <th className="px-4 py-2 text-right">{privileged ? 'VP' : pos}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.map((p) => {
-              const rt = rates(p)
-              const mine2 = rt[pos] ?? rt.REN
-              return (
+        {privileged ? (
+          /* the top sees every level's take-home per project */
+          <table className="w-full min-w-[680px] text-xs">
+            <thead>
+              <tr className="border-b border-border text-left text-[9px] uppercase tracking-wider text-muted">
+                <th className="px-4 py-2">{L('Project', 'Projek', 'Proyek')}</th>
+                <th className="px-2 py-2 text-right">{L('Unit price', 'Harga unit', 'Harga unit')}</th>
+                {CHAIN.map((c) => <th key={c.key} className="px-2 py-2 text-right">{c.label}</th>)}
+                <th className="px-4 py-2 text-right">RGR</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((p) => (
                 <tr key={p.id} className={clsx('border-b border-border last:border-0', p.id === sel.id && 'bg-accent-soft/30')}>
-                  <td className="px-4 py-2.5">
-                    <p className="font-extrabold">{p.name} {p.rgrOn && '🎁'}</p>
-                    <p className="text-[9px] text-muted">HOT {p.hotOn ? '✓' : '✗'} · TL {p.tlOn ? '✓' : '✗'} · L {p.lOn ? '✓' : '✗'}</p>
-                  </td>
+                  <td className="px-4 py-2.5"><p className="font-extrabold">{p.name} {p.rgrOn && '🎁'}</p></td>
                   <td className="px-2 py-2.5 text-right">RM {p.price.toLocaleString('en-MY', { minimumFractionDigits: 2 })}</td>
-                  <td className="px-2 py-2.5 text-right">{fmt(sst((p.price * p.ren) / 100))}</td>
-                  <td className="px-2 py-2.5 text-right font-bold text-warning">{p.rgrOn ? `🎁 ${fmt(sst((p.price * p.rgrPct) / 100))}` : '—'}</td>
-                  <td className="px-4 py-2.5 text-right font-extrabold text-accent">{fmt(sst((p.price * (privileged ? rt.VP : mine2)) / 100))}</td>
+                  {CHAIN.map((c) => {
+                    const th = takeHome(p, c.key)
+                    return (
+                      <td key={c.key} className={clsx('px-2 py-2.5 text-right tabular-nums',
+                        c.key === 'VP' ? 'font-extrabold text-accent' : th == null ? 'text-muted' : '')}>
+                        {th == null ? '—' : fmt(th)}
+                      </td>
+                    )
+                  })}
+                  <td className="px-4 py-2.5 text-right font-bold text-warning">{p.rgrOn ? `🎁 ${fmt(sst((p.price * p.rgrPct) / 100))}` : '—'}</td>
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          /* a front-line agent sees their own line plus REN and RGR */
+          <table className="w-full min-w-[560px] text-xs">
+            <thead>
+              <tr className="border-b border-border text-left text-[9px] uppercase tracking-wider text-muted">
+                <th className="px-4 py-2">{L('Project', 'Projek', 'Proyek')}</th><th className="px-2 py-2 text-right">{L('Unit price', 'Harga unit', 'Harga unit')}</th>
+                <th className="px-2 py-2 text-right">REN</th><th className="px-2 py-2 text-right">RGR</th>
+                <th className="px-4 py-2 text-right">{pos}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((p) => {
+                const rt = rates(p)
+                const mine2 = rt[pos] ?? rt.REN
+                return (
+                  <tr key={p.id} className={clsx('border-b border-border last:border-0', p.id === sel.id && 'bg-accent-soft/30')}>
+                    <td className="px-4 py-2.5">
+                      <p className="font-extrabold">{p.name} {p.rgrOn && '🎁'}</p>
+                      <p className="text-[9px] text-muted">HOT {p.hotOn ? '✓' : '✗'} · TL {p.tlOn ? '✓' : '✗'} · L {p.lOn ? '✓' : '✗'}</p>
+                    </td>
+                    <td className="px-2 py-2.5 text-right">RM {p.price.toLocaleString('en-MY', { minimumFractionDigits: 2 })}</td>
+                    <td className="px-2 py-2.5 text-right">{fmt(sst((p.price * p.ren) / 100))}</td>
+                    <td className="px-2 py-2.5 text-right font-bold text-warning">{p.rgrOn ? `🎁 ${fmt(sst((p.price * p.rgrPct) / 100))}` : '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-extrabold text-accent">{fmt(sst((p.price * mine2) / 100))}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </Card>
       <p className="pb-4 text-center text-[10px] text-muted">{L(
         'Net after 8% SST (always absorbed for Primary) · MY rules locked (spec §E)',
