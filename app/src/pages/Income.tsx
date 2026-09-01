@@ -42,6 +42,9 @@ function PrimaryMYNew() {
       TM: 0,
       VP: (p.hotOn ? p.vp - p.hot : p.vp) - share,
       GVP: (p.hotOn ? p.vp - p.hot : p.vp) - share,
+      // IQI (company) funds its equal share of the TL+L pool — a NEGATIVE line,
+      // exactly as the original worksheet shows it, so the split balances.
+      IQI: D + E2 > 0 ? -share : 0,
     } as Record<string, number>
   }
   const sel = projects.find((p) => p.id === pid) ?? projects[0]
@@ -57,10 +60,12 @@ function PrimaryMYNew() {
   const CHAIN: { key: string; label: string }[] = [
     { key: 'VP', label: 'VP' }, { key: 'HOT', label: 'HOT' },
     { key: 'TL', label: 'TL' }, { key: 'L', label: 'L' }, { key: 'REN', label: 'REN' },
+    { key: 'IQI', label: 'IQI ⓒ' },
   ]
   const layerOn = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
     rank === 'REN' || rank === 'VP' ? true
-    : rank === 'HOT' ? !!p.hotOn : rank === 'TL' ? !!p.tlOn : rank === 'L' ? !!p.lOn : false
+    : rank === 'HOT' ? !!p.hotOn : rank === 'TL' ? !!p.tlOn : rank === 'L' ? !!p.lOn
+    : rank === 'IQI' ? ((p.tlOn ? 1 : 0) + (p.lOn ? 1 : 0)) > 0 : false
   const takeHome = (p: NonNullable<IncomeCfg['myPrimary']>[number], rank: string) =>
     layerOn(p, rank) ? sst((p.price * (rates(p)[rank] ?? 0)) / 100) : null
   return (
