@@ -1,10 +1,11 @@
 /* IQI AG Income Calculator — SUBSALE (full production math, see SPEC-INCOME-SUBSALE.md)
    + property comparison picker. Every constant is admin-set per country. */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, ChevronDown, Printer } from 'lucide-react'
 import clsx from 'clsx'
 import { useApp } from '../lib/store'
+import { supabase } from '../lib/supabase'
 import { Card, Chip } from '../components/ui'
 import {
   applySst,
@@ -13,6 +14,7 @@ import {
   ID_CHAIN,
   totalRate,
   useIncomeCfg,
+  refreshIncomeCfg,
   type ChainLayer,
   type IncomeCfg,
 } from '../lib/income'
@@ -243,11 +245,105 @@ function PrimaryMYNew() {
           </table>
         )}
       </Card>
+      {/* VP / GVP / Commander / admin: add & edit projects right here */}
+      <ProjectEditorMY />
+
       <p className="pb-4 text-center text-[10px] text-muted">{L(
-        'Net after 8% SST (always absorbed for Primary) · MY rules locked (spec §E)',
-        'Bersih selepas 8% SST (sentiasa diserap untuk Primary) · peraturan MY dikunci (spec §E)',
-        'Bersih setelah 8% SST (selalu diserap untuk Primary) · aturan MY terkunci (spec §E)')}</p>
+        'Net after 8% SST (always absorbed for Primary) · §E formula fixed; VP+ set the project numbers',
+        'Bersih selepas 8% SST (sentiasa diserap untuk Primary) · formula §E tetap; VP+ tetapkan nilai projek',
+        'Bersih setelah 8% SST (selalu diserap untuk Primary) · formula §E tetap; VP+ mengatur nilai proyek')}</p>
     </>
+  )
+}
+
+/* ---------- MY Primary project editor — VP / GVP / Commander / admin ----------
+   Writes only the myPrimary list through fn_set_my_primary (101), which enforces
+   rank + own-country. §E math stays fixed; here you set each project's numbers. */
+function ProjectEditorMY() {
+  const { user, locale } = useApp()
+  const cfg = useIncomeCfg('MY')
+  const L = useCallback((en: string, bm: string, id: string) =>
+    locale === 'bm' ? bm : locale === 'id' ? id : en, [locale])
+  const [canEdit, setCanEdit] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  useEffect(() => { supabase?.rpc('fn_can_edit_projects').then(({ data }) => setCanEdit(data === true)) }, [])
+  if (!user || !canEdit) return null
+
+  type P = NonNullable<IncomeCfg['myPrimary']>[number]
+  const list: P[] = cfg.myPrimary ?? []
+  const commit = async (next: P[]) => {
+    if (!supabase) return
+    setBusy(true)
+    const { error } = await supabase.rpc('fn_set_my_primary', { p_country: 'MY', p_projects: next })
+    if (!error) await refreshIncomeCfg('MY')
+    setBusy(false)
+    setMsg(error ? `⚠ ${error.message}` : '✓ Saved — live for every agent')
+    setTimeout(() => setMsg(''), 3000)
+  }
+  const patch = (i: number, p: Partial<P>) => commit(list.map((x, j) => (j === i ? { ...x, ...p } : x)))
+  const add = () => commit([...list, { id: `m${Date.now()}`, name: 'New project', price: 500000, ren: 2, vp: 0.73, hot: 0.4, hotOn: true, tlOn: true, lOn: true, rgrOn: false, rgrPct: 1, appear: ['income'] } as P])
+  const remove = (i: number) => { if (window.confirm(`Remove ${list[i].name}?`)) commit(list.filter((_, j) => j !== i)) }
+
+  const num = 'w-16 rounded-lg border border-border bg-surface px-1.5 py-1 text-center text-xs font-bold outline-none focus:border-accent'
+  return (
+    <Card className="mb-4 p-4">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full cursor-pointer items-center justify-between">
+        <span className="border-l-2 border-accent pl-2 font-display text-sm font-extrabold">
+          {L('Edit projects', 'Sunting projek', 'Edit proyek')} <span className="text-[11px] font-normal text-muted">· VP+</span>
+        </span>
+        <span className="text-xs text-accent">{open ? L('close', 'tutup', 'tutup') : L('open', 'buka', 'buka')}</span>
+      </button>
+      {msg && <p className={clsx('mt-2 text-xs font-bold', msg.startsWith('⚠') ? 'text-danger' : 'text-success')}>{msg}</p>}
+      {open && (
+        <div className="mt-3">
+          <p className="mb-2 text-[11px] text-muted">
+            {L('You set each project’s REN%, VP pool% (A) and HOT% (B). The §E split (TL=50%×B, L=30%×B) is automatic.',
+               'Anda tetapkan REN%, VP pool% (A) dan HOT% (B) setiap projek. Pembahagian §E (TL=50%×B, L=30%×B) automatik.',
+               'Anda mengatur REN%, VP pool% (A) dan HOT% (B) tiap proyek. Pembagian §E (TL=50%×B, L=30%×B) otomatis.')}
+          </p>
+          {list.map((pr, i) => (
+            <div key={pr.id} className="mb-2 rounded-lg border border-border p-2">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <input defaultValue={pr.name} onBlur={(e) => e.target.value !== pr.name && patch(i, { name: e.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-surface px-2 py-1.5 text-xs font-bold outline-none focus:border-accent" />
+                <button type="button" disabled={busy} onClick={() => remove(i)}
+                  className="cursor-pointer rounded-lg border border-danger/50 px-2 py-1.5 text-[10px] font-bold text-danger">✕</button>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-muted">
+                <label>{L('Price', 'Harga', 'Harga')} <input type="number" defaultValue={pr.price} aria-label="Price"
+                  onBlur={(e) => Number(e.target.value) !== pr.price && patch(i, { price: Number(e.target.value) || 0 })}
+                  className="ml-1 w-28 rounded-lg border border-border bg-surface px-2 py-1 text-center text-ink outline-none focus:border-accent" /></label>
+                <label>REN% <input type="number" step={0.01} defaultValue={pr.ren} aria-label="REN %"
+                  onBlur={(e) => Number(e.target.value) !== pr.ren && patch(i, { ren: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1')} /></label>
+                <label title="VP+HOT leadership pool %">VP pool% (A) <input type="number" step={0.01} defaultValue={pr.vp} aria-label="VP pool %"
+                  onBlur={(e) => Number(e.target.value) !== pr.vp && patch(i, { vp: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1 border-accent/50')} /></label>
+                <label title="HOT %, drives TL (50%) and L (30%)">HOT% (B) <input type="number" step={0.01} defaultValue={pr.hot} aria-label="HOT %"
+                  onBlur={(e) => Number(e.target.value) !== pr.hot && patch(i, { hot: Number(e.target.value) || 0 })} className={clsx(num, 'ml-1 border-accent/50')} /></label>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {([['hotOn', 'HOT'], ['tlOn', 'TL'], ['lOn', 'L']] as const).map(([k, lbl]) => (
+                  <button key={k} type="button" disabled={busy} onClick={() => patch(i, { [k]: !pr[k] } as Partial<P>)}
+                    className={clsx('cursor-pointer rounded-lg border px-2 py-1 text-[10px] font-bold',
+                      pr[k] ? 'border-accent text-accent' : 'border-border text-muted opacity-50')}>
+                    {pr[k] ? '✓' : '✗'} {lbl}
+                  </button>
+                ))}
+                <button type="button" disabled={busy} onClick={() => patch(i, { rgrOn: !pr.rgrOn })}
+                  className={clsx('cursor-pointer rounded-lg border px-2 py-1 text-[10px] font-bold', pr.rgrOn ? 'border-warning text-warning' : 'border-border text-muted opacity-50')}>🎁 RGR</button>
+                {pr.rgrOn && (
+                  <input type="number" step={0.5} defaultValue={pr.rgrPct} aria-label="RGR %"
+                    onBlur={(e) => Number(e.target.value) !== pr.rgrPct && patch(i, { rgrPct: Number(e.target.value) || 0 })} className={clsx(num, 'border-warning/50')} />
+                )}
+              </div>
+            </div>
+          ))}
+          <button type="button" disabled={busy} onClick={add}
+            className="cursor-pointer text-xs font-bold text-accent disabled:opacity-40">+ {L('Add project', 'Tambah projek', 'Tambah proyek')}</button>
+        </div>
+      )}
+    </Card>
   )
 }
 

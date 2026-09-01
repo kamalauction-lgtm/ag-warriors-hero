@@ -178,6 +178,16 @@ async function pullIncomeCfg(c: Country) {
   window.dispatchEvent(new Event('agw-income'))
 }
 
+/* Force a re-pull after a VP/Commander saves projects through fn_set_my_primary,
+   so the calculator updates without a page reload. */
+export async function refreshIncomeCfg(c: Country) {
+  if (!supabase) return
+  const { data } = await supabase.from('income_rules').select('cfg').eq('country', c).maybeSingle()
+  const cfg = (data as { cfg: Partial<IncomeCfg> } | null)?.cfg
+  try { if (cfg) localStorage.setItem(key(c), JSON.stringify(cfg)) } catch { /* ignore */ }
+  window.dispatchEvent(new Event('agw-income'))
+}
+
 const sub = (cb: () => void) => {
   window.addEventListener('agw-income', cb)
   return () => window.removeEventListener('agw-income', cb)
