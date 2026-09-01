@@ -411,17 +411,17 @@ Return ONLY JSON: {"for_agent":{"steps":[strings]},"for_helper":{"situation":str
     generationConfig: { temperature: 0.5, maxOutputTokens: 1100, responseMimeType: 'application/json' },
   })
   const model = env.GEMINI_MODEL || 'gemini-flash-latest'
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`
+  // Hard cap the AI attempt with a real abort. AbortSignal.timeout cancels the
+  // underlying request at 8s (Promise.race does NOT — it leaves the socket open,
+  // which is why "Ask for Help" was still taking 30-60s). One try, then fallback.
   let res = null
-  for (let i = 0; i < 2; i++) {
-    if (i > 0) await new Promise((r) => setTimeout(r, 1200))
-    try {
-      res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body },
-      )
-    } catch { res = null; continue }
-    if (res.ok || (res.status !== 429 && res.status < 500)) break
-  }
+  try {
+    res = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+      signal: AbortSignal.timeout(8000),
+    })
+  } catch { res = null }   // abort or network → instant fallback
   if (!res || !res.ok) return { plan: fb, generated_by: 'fallback' }
   try {
     const ai = JSON.parse((await res.json())?.candidates?.[0]?.content?.parts?.[0]?.text)

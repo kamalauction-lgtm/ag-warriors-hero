@@ -349,9 +349,18 @@ async function handleCoachHelp(request, env) {
   const agentId = (await who.json())?.id
   if (!agentId) return reply({ error: 'invalid session' }, 401)
 
-  const factsR = await rpc(env, 'coach_facts', { p_agent: agentId })
-  if (!factsR.ok || !factsR.body) return reply({ error: 'facts unavailable' }, 500)
-  const facts = factsR.body
+  // Facts enrich the help, but must NEVER block it. A non-enrolled agent (or a
+  // slow coach_facts) previously 500'd the whole request; now we fall back to a
+  // minimal profile so the message still reaches a human.
+  let facts = null
+  try {
+    const factsR = await rpc(env, 'coach_facts', { p_agent: agentId })
+    if (factsR.ok && factsR.body) facts = factsR.body
+  } catch { facts = null }
+  if (!facts) {
+    const pr = await rest(env, `/profiles?select=name,country&id=eq.${agentId}`)
+    facts = { agent: { name: pr.body?.[0]?.name ?? 'A warrior', country: pr.body?.[0]?.country ?? 'MY' } }
+  }
   // country default: ID gets Bahasa Indonesia, MY (and everyone else) English;
   // the app passes its own language toggle so BM users still get BM
   const lang = ['en', 'ms', 'id'].includes(body?.lang) ? body.lang
